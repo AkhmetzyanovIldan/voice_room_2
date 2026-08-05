@@ -9,7 +9,7 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Хранилище комнат: roomId -> { name, maxSeats, users: {}, seats: {} }
+// Хранилище комнат: roomId -> { name, maxSeats, hasChat, users: {}, seats: {} }
 const rooms = {};
 
 function generateRoomCode() {
@@ -20,7 +20,7 @@ io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
     // Создать комнату
-    socket.on('create-room', ({ roomName, username, maxSeats, hasChat }) => {
+    socket.on('create-room', ({ roomName, username, photoUrl, maxSeats, hasChat }) => {
         let roomId = generateRoomCode();
         while (rooms[roomId]) {
             roomId = generateRoomCode();
@@ -35,32 +35,34 @@ io.on('connection', (socket) => {
         rooms[roomId] = {
             name: roomName || 'Комната',
             maxSeats: max,
-            hasChat: hasChat !== undefined ? hasChat : true, // Сохраняем настройку чата
+            hasChat: hasChat !== undefined ? hasChat : true,
             users: {},
             seats: seats
         };
 
-        joinRoomLogic(socket, roomId, username);
+        joinRoomLogic(socket, roomId, username, photoUrl);
     });
 
     // Войти в комнату
-    socket.on('join-room', ({ roomId, username }) => {
+    socket.on('join-room', ({ roomId, username, photoUrl }) => {
         if (!rooms[roomId]) {
             socket.emit('error-msg', 'Комната не найдена!');
             return;
         }
-        joinRoomLogic(socket, roomId, username);
+        joinRoomLogic(socket, roomId, username, photoUrl);
     });
 
-    function joinRoomLogic(socket, roomId, username) {
+    function joinRoomLogic(socket, roomId, username, photoUrl) {
         socket.join(roomId);
         socket.data.roomId = roomId;
         socket.data.username = username || 'Гость';
+        socket.data.photoUrl = photoUrl || ''; // Сохраняем ссылку на фото
 
         const room = rooms[roomId];
         room.users[socket.id] = {
             id: socket.id,
             username: socket.data.username,
+            photoUrl: socket.data.photoUrl, // Передаем в общую структуру
             seat: null,
             mic: false,
             audio: true
@@ -133,13 +135,12 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('update-room', {
             roomName: room.name,
             maxSeats: room.maxSeats,
-            hasChat: room.hasChat, // Передаем состояние чата
+            hasChat: room.hasChat,
             users: room.users,
             seats: room.seats
         });
     }
 
-    
     // Отключение
     socket.on('disconnect', () => {
         const roomId = socket.data.roomId;
@@ -159,7 +160,18 @@ io.on('connection', (socket) => {
         console.log('User disconnected:', socket.id);
     });
 
-    
+    // --- WebRTC Signaling ---
+    socket.on('webrtc-offer', ({ targetId, offer }) => {
+        io.to(targetId).emit('webrtc-offer', { senderId: socket.id, offer });
+    });
+
+    socket.on('webrtc-answer', ({ targetId, answer }) => {
+        io.to(targetId).emit('webrtc-answer', { senderId: socket.id, answer });
+    });
+
+    socket.on('webrtc-ice-candidate', ({ targetId, candidate }) => {
+        io.to(targetId).emit('webrtc-ice-candidate', { senderId: socket.id, candidate });
+    });
 });
 
 const PORT = process.env.PORT || 3000;

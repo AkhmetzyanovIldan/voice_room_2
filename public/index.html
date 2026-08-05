@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Room Mini App</title>
+    <title>Голосовой чат</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
@@ -38,20 +38,20 @@
         .room-code-label { font-size: 12px; color: #888; }
         .role-indicator { font-size: 11px; color: #03dac6; }
 
-       /* Основная рабочая область комнаты */
+        /* Основная рабочая область комнаты */
         .room-main-area { display: flex; flex-direction: column; width: 100%; max-width: 420px; flex: 1; align-items: center; justify-content: center; gap: 10px; padding: 5px 0; overflow: hidden; }
 
-        /* Контейнер стола (увеличен) */
+        /* Контейнер стола */
         .table-container { position: relative; width: 280px; height: 280px; min-width: 280px; min-height: 280px; display: flex; align-items: center; justify-content: center; }
         .table-center { width: 110px; height: 110px; background: #1e1e1e; border-radius: 50%; border: 2px solid #333; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; z-index: 1; }
         .table-center span { font-size: 13px; color: #aaa; font-weight: bold; }
         #users-count { font-size: 10px; color: #666; margin-top: 2px;}
 
-        /* Места за столом (подстроены под больший радиус) */
+        /* Места за столом */
         .seat { position: absolute; width: 40px; height: 40px; background: #000; border: 2px solid #333; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; color: #bb86fc; transition: 0.2s; z-index: 2; }
         .seat.occupied { border-color: #bb86fc; background: #1e1e1e; font-size: 10px; text-align: center; overflow: hidden; padding: 2px; color: #fff; }
 
-        /* Чат под столом (увеличен до удобного размера) */
+        /* Чат под столом */
         .chat-container { width: 100%; height: 130px; min-height: 130px; background: #181818; border: 1px solid #333; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
         .chat-container.hidden { display: none !important; }
         .chat-messages { flex: 1; padding: 6px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
@@ -62,7 +62,7 @@
         .chat-input-area input { flex: 1; background: transparent; border: none; color: #fff; font-size: 12px; padding: 6px; outline: none; }
         .chat-input-area button { background: #bb86fc; color: #121212; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; }
 
-        /* Панель списка слушателей (выезжающая панель) */
+        /* Панель списка слушателей */
         #listeners-panel { position: absolute; top: 75px; right: 15px; width: 200px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; z-index: 5; max-height: 180px; overflow-y: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
         #listeners-panel h4 { font-size: 12px; color: #888; margin-bottom: 6px; border-bottom: 1px solid #333; padding-bottom: 4px; }
         .listener-item { font-size: 12px; color: #ddd; padding: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -87,7 +87,6 @@
                 <label>Мест за столом (говорящих): <span id="val-seats" class="range-value">6</span></label>
                 <input type="range" id="input-max-seats" min="1" max="12" value="6" oninput="document.getElementById('val-seats').innerText = this.value">
             </div>
-            <!-- Добавлено: галочка чата -->
             <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
                 <input type="checkbox" id="input-has-chat" checked style="width: 18px; height: 18px; accent-color: #bb86fc;">
                 <label for="input-has-chat">Включить чат в комнате</label>
@@ -99,7 +98,7 @@
 
     <!-- ЛОББИ -->
     <div id="lobby">
-        <h1>Мафия: Голос</h1>
+        <h1>Голосовой чат</h1>
         <div id="error-box" class="error"></div>
         <input type="text" id="username-input" placeholder="Ваше имя" maxlength="15">
         
@@ -126,7 +125,7 @@
             <div id="listeners-list-content"></div>
         </div>
 
-        <!-- Основная область: Стол слева, Чат справа -->
+        <!-- Основная область: Стол и Чат -->
         <div class="room-main-area">
             <div class="table-container" id="table-container">
                 <div class="table-center">
@@ -136,9 +135,7 @@
             </div>
 
             <div class="chat-container">
-                <div class="chat-messages" id="chat-messages">
-                    <!-- Сообщения чата -->
-                </div>
+                <div class="chat-messages" id="chat-messages"></div>
                 <div class="chat-input-area">
                     <input type="text" id="chat-input" placeholder="Сообщение..." maxlength="150">
                     <button type="button" id="chat-send-btn">➤</button>
@@ -169,6 +166,14 @@
         let localStream = null;
         let isListenersPanelOpen = false;
 
+        const peers = {}; // socketId -> RTCPeerConnection
+        const stunsServers = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             document.getElementById('username-input').value = tg.initDataUnsafe.user.first_name;
         }
@@ -183,21 +188,32 @@
             document.getElementById('modal-overlay').classList.remove('hidden');
         }
 
-        function confirmCreateRoom() {
+        // Запрос микрофона и создание комнаты
+        async function confirmCreateRoom() {
+            await initAudio();
             const roomName = document.getElementById('room-name-input').value.trim();
             const username = document.getElementById('username-input').value.trim() || 'Игрок';
+            
+            // Получаем аватарку из Telegram (если ее нет — отправляем пустую строку)
+            const photoUrl = (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.photo_url) ? tg.initDataUnsafe.user.photo_url : '';
+            
             const maxSeats = document.getElementById('input-max-seats').value;
             const hasChat = document.getElementById('input-has-chat').checked;
 
             document.getElementById('modal-overlay').classList.add('hidden');
-            socket.emit('create-room', { roomName, username, maxSeats, hasChat });
+            socket.emit('create-room', { roomName, username, photoUrl, maxSeats, hasChat });
         }
 
-        document.getElementById('join-btn').onclick = () => {
+        // Запрос микрофона и вход в комнату
+        document.getElementById('join-btn').onclick = async () => {
             const roomId = document.getElementById('room-code-input').value.trim();
             const username = document.getElementById('username-input').value.trim() || 'Игрок';
             if (!roomId) return showError('Введите код комнаты');
-            socket.emit('join-room', { roomId, username });
+
+            const photoUrl = (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.photo_url) ? tg.initDataUnsafe.user.photo_url : '';
+
+            await initAudio();
+            socket.emit('join-room', { roomId, username, photoUrl });
         };
 
         socket.on('error-msg', (msg) => showError(msg));
@@ -211,13 +227,11 @@
             
             document.getElementById('room-title-display').innerText = roomName;
             document.getElementById('room-code-display').innerText = roomId;
-            initLocalAudio();
         });
 
         socket.on('update-room', ({ roomName, maxSeats, hasChat, users, seats }) => {
             document.getElementById('room-title-display').innerText = roomName;
             
-            // Управление отображением чата в зависимости от настроек комнаты
             const chatContainer = document.querySelector('.chat-container');
             if (hasChat === false) {
                 chatContainer.classList.add('hidden');
@@ -227,9 +241,16 @@
 
             renderSeats(maxSeats, users, seats);
             updateUI(users, seats);
+
+            // Автоматически устанавливаем WebRTC соединение со всеми участниками в комнате
+            Object.keys(users).forEach(userId => {
+                if (userId !== socket.id) {
+                    callUser(userId);
+                }
+            });
         });
     
-        // Получение сообщений чата
+        // Чат
         socket.on('chat-message', ({ username, text, time }) => {
             const chatBox = document.getElementById('chat-messages');
             if (!chatBox) return;
@@ -237,7 +258,6 @@
             msgEl.className = 'chat-msg';
             msgEl.innerHTML = `<span class="time">${time}</span><span class="author">${username}</span>${text}`;
             chatBox.appendChild(msgEl);
-            // Автопрокрутка вниз к новым сообщениям
             chatBox.scrollTop = chatBox.scrollHeight;
         });
 
@@ -251,14 +271,11 @@
             }
         }
 
-        // Надежная привязка отправки по кнопке и клавише Enter
         document.addEventListener('DOMContentLoaded', () => {
             const sendBtn = document.getElementById('chat-send-btn');
             const chatInput = document.getElementById('chat-input');
 
-            if (sendBtn) {
-                sendBtn.onclick = sendChatMessage;
-            }
+            if (sendBtn) sendBtn.onclick = sendChatMessage;
             if (chatInput) {
                 chatInput.onkeydown = (e) => {
                     if (e.key === 'Enter') {
@@ -277,8 +294,8 @@
             const container = document.getElementById('table-container');
             container.querySelectorAll('.seat').forEach(el => el.remove());
 
-            const radius = 110; // Новый больший радиус
-            const centerX = 140; // Центр для контейнера 280x280
+            const radius = 110;
+            const centerX = 140;
             const centerY = 140;
 
             for (let i = 0; i < maxSeats; i++) {
@@ -297,11 +314,22 @@
                 if (userIdInSeat) {
                     const user = users[userIdInSeat];
                     seatEl.classList.add('occupied');
-                    seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%;"><b>${user ? user.username : ''}</b>${user && !user.mic ? ' 🔇' : ''}</div>`;
-                } else {
-                    seatEl.classList.remove('occupied');
-                    seatEl.innerText = '+';
-                }
+
+                    // Если есть аватарка из Телеграма, показываем её, иначе инициал
+                    if (user && user.photoUrl) {
+                        seatEl.innerHTML = `<img src="${user.photoUrl}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`;
+                    } else {
+                        seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%; font-size:11px;"><b>${user ? user.username[0] : ''}</b></div>`;
+                    }
+
+                    // Значок заглушенного микрофона поверх аватарки
+                    if (user && !user.mic) {
+                        seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%;"><b>${user ? user.username : ''}</b>${user && !user.mic ? ' 🔇' : ''}</div>`;
+                    }
+                    } else {
+                        seatEl.classList.remove('occupied');
+                        seatEl.innerText = '+';
+                    }
 
                 container.appendChild(seatEl);
             }
@@ -385,27 +413,35 @@
             window.location.reload();
         }
 
-        async function initLocalAudio() {
+        // --- WebRTC Голосовая связь ---
+        async function initAudio() {
+            if (localStream) return;
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 localStream.getAudioTracks()[0].enabled = false;
-            } catch (e) {
-                console.error('Ошибка доступа к микрофону:', e);
+                console.log('Микрофон успешно инициализирован');
+            } catch (err) {
+                console.error('Ошибка доступа к микрофону:', err);
+                alert('Не удалось получить доступ к микрофону. Голос будет недоступен.');
             }
         }
 
         function toggleMic() {
-            if (mySeat === null) return;
+            if (mySeat === null || !localStream) return;
             isMicOn = !isMicOn;
-            if (localStream) {
-                localStream.getAudioTracks()[0].enabled = isMicOn;
-            }
+            localStream.getAudioTracks()[0].enabled = isMicOn;
             socket.emit('toggle-media', { mic: isMicOn });
         }
 
         function toggleAudio() {
             isAudioOn = !isAudioOn;
             const audioBtn = document.getElementById('audio-btn');
+            
+            // Включаем/выключаем звук всех удаленных аудиоэлементов
+            document.querySelectorAll('audio').forEach(el => {
+                el.muted = !isAudioOn;
+            });
+
             if (isAudioOn) {
                 audioBtn.classList.add('active');
                 audioBtn.innerText = '🔊 Звук: Вкл';
@@ -414,5 +450,69 @@
                 audioBtn.innerText = '🔊 Звук: Выкл';
             }
         }
+
+        socket.on('webrtc-offer', async ({ senderId, offer }) => {
+            let pc = createPeerConnection(senderId);
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit('webrtc-answer', { targetId: senderId, answer });
+        });
+
+        socket.on('webrtc-answer', async ({ senderId, answer }) => {
+            let pc = peers[senderId];
+            if (pc) {
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+            }
+        });
+
+        socket.on('webrtc-ice-candidate', async ({ senderId, candidate }) => {
+            let pc = peers[senderId];
+            if (pc && candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+        });
+
+        function createPeerConnection(targetId) {
+            if (peers[targetId]) return peers[targetId];
+
+            const pc = new RTCPeerConnection(stunsServers);
+            peers[targetId] = pc;
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            }
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('webrtc-ice-candidate', { targetId, candidate: event.candidate });
+                }
+            };
+
+            pc.ontrack = (event) => {
+                let audioEl = document.getElementById(`audio-${targetId}`);
+                if (!audioEl) {
+                    audioEl = document.createElement('audio');
+                    audioEl.id = `audio-${targetId}`;
+                    audioEl.autoplay = true;
+                    audioEl.muted = !isAudioOn;
+                    document.body.appendChild(audioEl);
+                }
+                audioEl.srcObject = event.streams[0];
+            };
+
+            return pc;
+        }
+
+        async function callUser(targetId) {
+            let pc = createPeerConnection(targetId);
+            // Предотвращаем дублирование офферов, если уже создано
+            if (pc.signalingState === "stable") {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit('webrtc-offer', { targetId, offer });
+            }
+        }
     </script>
 </body>
+</html>
