@@ -415,14 +415,14 @@
 
         // --- WebRTC Голосовая связь ---
         async function initAudio() {
-            if (localStream) return;
             try {
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                localStream.getAudioTracks()[0].enabled = false;
-                console.log('Микрофон успешно инициализирован');
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { echoCancellation: true, noiseSuppression: true }, 
+                    video: false 
+                });
+                console.log("Микрофон успешно подключен");
             } catch (err) {
-                console.error('Ошибка доступа к микрофону:', err);
-                alert('Не удалось получить доступ к микрофону. Голос будет недоступен.');
+                console.warn("Не удалось получить доступ к микрофону, продолжаем без него:", err);
             }
         }
 
