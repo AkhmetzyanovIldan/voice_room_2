@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Room Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background-color: #121212; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; overscroll-behavior: none; }
+        
+        .hidden { display: none !important; }
+        
+        /* Лобби */
+        #lobby { display: flex; flex-direction: column; gap: 15px; width: 85%; max-width: 350px; }
+        h1 { text-align: center; font-size: 24px; margin-bottom: 5px; color: #bb86fc; }
+        .section-title { font-size: 13px; color: #888; margin-top: 5px; margin-bottom: -5px; }
+        input, button { padding: 12px; border-radius: 8px; border: none; font-size: 16px; outline: none; }
+        input[type="text"] { background: #1e1e1e; color: #fff; border: 1px solid #333; }
+        button { background: #bb86fc; color: #121212; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:active { opacity: 0.8; }
+        .btn-secondary { background: #2d2d2d; color: #fff; border: 1px solid #444; }
+
+        /* Модальное окно настроек */
+        #modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10; }
+        .modal { background: #1e1e1e; padding: 20px; border-radius: 12px; width: 90%; max-width: 320px; border: 1px solid #333; display: flex; flex-direction: column; gap: 15px; }
+        .modal h2 { font-size: 18px; color: #bb86fc; text-align: center; }
+        .range-group { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: #ccc; }
+        .range-group input[type="range"] { width: 100%; accent-color: #bb86fc; }
+        .range-value { color: #03dac6; font-weight: bold; float: right; }
+
+        /* Комната */
+        #room { width: 100%; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 10px; position: relative; }
+        
+        .room-header { text-align: center; display: flex; flex-direction: column; gap: 2px; width: 100%; }
+        .room-title-label { font-size: 16px; font-weight: bold; color: #bb86fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px;}
+        .room-code-label { font-size: 12px; color: #888; }
+        .role-indicator { font-size: 11px; color: #03dac6; }
+
+       /* Основная рабочая область комнаты */
+        .room-main-area { display: flex; flex-direction: column; width: 100%; max-width: 420px; flex: 1; align-items: center; justify-content: center; gap: 10px; padding: 5px 0; overflow: hidden; }
+
+        /* Контейнер стола (увеличен) */
+        .table-container { position: relative; width: 280px; height: 280px; min-width: 280px; min-height: 280px; display: flex; align-items: center; justify-content: center; }
+        .table-center { width: 110px; height: 110px; background: #1e1e1e; border-radius: 50%; border: 2px solid #333; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; z-index: 1; }
+        .table-center span { font-size: 13px; color: #aaa; font-weight: bold; }
+        #users-count { font-size: 10px; color: #666; margin-top: 2px;}
+
+        /* Места за столом (подстроены под больший радиус) */
+        .seat { position: absolute; width: 40px; height: 40px; background: #000; border: 2px solid #333; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; color: #bb86fc; transition: 0.2s; z-index: 2; }
+        .seat.occupied { border-color: #bb86fc; background: #1e1e1e; font-size: 10px; text-align: center; overflow: hidden; padding: 2px; color: #fff; }
+
+        /* Чат под столом (увеличен до удобного размера) */
+        .chat-container { width: 100%; height: 130px; min-height: 130px; background: #181818; border: 1px solid #333; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+        .chat-container.hidden { display: none !important; }
+        .chat-messages { flex: 1; padding: 6px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+        .chat-msg { background: #222; padding: 5px 8px; border-radius: 6px; word-break: break-word; line-height: 1.3; }
+        .chat-msg .author { color: #bb86fc; font-weight: bold; margin-bottom: 2px; display: block; font-size: 11px; }
+        .chat-msg .time { font-size: 9px; color: #666; float: right; margin-left: 5px; }
+        .chat-input-area { display: flex; border-top: 1px solid #333; background: #1e1e1e; padding: 4px; }
+        .chat-input-area input { flex: 1; background: transparent; border: none; color: #fff; font-size: 12px; padding: 6px; outline: none; }
+        .chat-input-area button { background: #bb86fc; color: #121212; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; }
+
+        /* Панель списка слушателей (выезжающая панель) */
+        #listeners-panel { position: absolute; top: 75px; right: 15px; width: 200px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; z-index: 5; max-height: 180px; overflow-y: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        #listeners-panel h4 { font-size: 12px; color: #888; margin-bottom: 6px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+        .listener-item { font-size: 12px; color: #ddd; padding: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Панель управления */
+        .controls { display: flex; gap: 6px; width: 95%; max-width: 480px; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; }
+        .ctrl-btn { flex: 1; min-width: 80px; padding: 10px 4px; border-radius: 8px; border: none; background: #2d2d2d; color: #fff; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; }
+        .ctrl-btn.active { background: #03dac6; color: #121212; font-weight: bold; }
+        .ctrl-btn.danger { background: #cf6679; color: #121212; font-weight: bold; }
+        .ctrl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .error { color: #cf6679; text-align: center; font-size: 14px; margin-bottom: 10px; min-height: 16px;}
+    </style>
+</head>
+<body>
+
+    <!-- МОДАЛЬНОЕ ОКНО НАСТРОЕК КОМНАТЫ -->
+    <div id="modal-overlay" class="hidden">
+        <div class="modal">
+            <h2>Настройки комнаты</h2>
+            <div class="range-group">
+                <label>Мест за столом (говорящих): <span id="val-seats" class="range-value">6</span></label>
+                <input type="range" id="input-max-seats" min="1" max="12" value="6" oninput="document.getElementById('val-seats').innerText = this.value">
+            </div>
+            <!-- Добавлено: галочка чата -->
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+                <input type="checkbox" id="input-has-chat" checked style="width: 18px; height: 18px; accent-color: #bb86fc;">
+                <label for="input-has-chat">Включить чат в комнате</label>
+            </div>
+            <button onclick="confirmCreateRoom()">Создать</button>
+            <button class="btn-secondary" onclick="document.getElementById('modal-overlay').classList.add('hidden')">Отмена</button>
+        </div>
+    </div>
+
+    <!-- ЛОББИ -->
+    <div id="lobby">
+        <h1>Мафия: Голос</h1>
+        <div id="error-box" class="error"></div>
+        <input type="text" id="username-input" placeholder="Ваше имя" maxlength="15">
+        
+        <div class="section-title">Создать новую комнату:</div>
+        <input type="text" id="room-name-input" placeholder="Название комнаты">
+        <button onclick="openSettingsModal()">Настроить и создать</button>
+
+        <div class="section-title" style="margin-top: 10px;">Или войти по коду:</div>
+        <input type="text" id="room-code-input" placeholder="Код комнаты (например, 4821)">
+        <button id="join-btn" class="btn-secondary">Войти в комнату</button>
+    </div>
+
+    <!-- КОМНАТА -->
+    <div id="room" class="hidden">
+        <div class="room-header">
+            <div class="room-title-label" id="room-title-display">Название комнаты</div>
+            <div class="room-code-label">Код: <span id="room-code-display">----</span></div>
+            <div class="role-indicator" id="role-label">Режим: Наблюдатель</div>
+        </div>
+
+        <!-- Выпадающая панель списка слушателей -->
+        <div id="listeners-panel" class="hidden">
+            <h4>Слушатели (<span id="listeners-count-label">0</span>)</h4>
+            <div id="listeners-list-content"></div>
+        </div>
+
+        <!-- Основная область: Стол слева, Чат справа -->
+        <div class="room-main-area">
+            <div class="table-container" id="table-container">
+                <div class="table-center">
+                    <span>Стол</span>
+                    <span id="users-count">0 участников</span>
+                </div>
+            </div>
+
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <!-- Сообщения чата -->
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Сообщение..." maxlength="150">
+                    <button type="button" id="chat-send-btn">➤</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="ctrl-btn" id="mic-btn" onclick="toggleMic()" disabled>🎤 Мик</button>
+            <button class="ctrl-btn active" id="audio-btn" onclick="toggleAudio()">🔊 Звук</button>
+            <button class="ctrl-btn" id="seat-action-btn" onclick="handleSeatAction()">🪑 Сесть</button>
+            <button class="ctrl-btn" id="listeners-toggle-btn" onclick="toggleListenersPanel()">👥 Слушатели</button>
+            <button class="ctrl-btn danger" onclick="leaveRoom()">🚪 Выйти</button>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        const socket = io();
+
+        let currentRoomId = null;
+        let myId = null;
+        let mySeat = null;
+        let isMicOn = false;
+        let isAudioOn = true;
+        let localStream = null;
+        let isListenersPanelOpen = false;
+
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            document.getElementById('username-input').value = tg.initDataUnsafe.user.first_name;
+        }
+
+        function openSettingsModal() {
+            const roomName = document.getElementById('room-name-input').value.trim();
+            if (!roomName) {
+                showError('Введите название комнаты');
+                return;
+            }
+            showError('');
+            document.getElementById('modal-overlay').classList.remove('hidden');
+        }
+
+        function confirmCreateRoom() {
+            const roomName = document.getElementById('room-name-input').value.trim();
+            const username = document.getElementById('username-input').value.trim() || 'Игрок';
+            const maxSeats = document.getElementById('input-max-seats').value;
+            const hasChat = document.getElementById('input-has-chat').checked;
+
+            document.getElementById('modal-overlay').classList.add('hidden');
+            socket.emit('create-room', { roomName, username, maxSeats, hasChat });
+        }
+
+        document.getElementById('join-btn').onclick = () => {
+            const roomId = document.getElementById('room-code-input').value.trim();
+            const username = document.getElementById('username-input').value.trim() || 'Игрок';
+            if (!roomId) return showError('Введите код комнаты');
+            socket.emit('join-room', { roomId, username });
+        };
+
+        socket.on('error-msg', (msg) => showError(msg));
+
+        socket.on('room-joined', ({ roomId, roomName }) => {
+            currentRoomId = roomId;
+            myId = socket.id;
+            document.getElementById('modal-overlay').classList.add('hidden');
+            document.getElementById('lobby').classList.add('hidden');
+            document.getElementById('room').classList.remove('hidden');
+            
+            document.getElementById('room-title-display').innerText = roomName;
+            document.getElementById('room-code-display').innerText = roomId;
+            initLocalAudio();
+        });
+
+        socket.on('update-room', ({ roomName, maxSeats, hasChat, users, seats }) => {
+            document.getElementById('room-title-display').innerText = roomName;
+            
+            // Управление отображением чата в зависимости от настроек комнаты
+            const chatContainer = document.querySelector('.chat-container');
+            if (hasChat === false) {
+                chatContainer.classList.add('hidden');
+            } else {
+                chatContainer.classList.remove('hidden');
+            }
+
+            renderSeats(maxSeats, users, seats);
+            updateUI(users, seats);
+        });
+    
+        // Получение сообщений чата
+        socket.on('chat-message', ({ username, text, time }) => {
+            const chatBox = document.getElementById('chat-messages');
+            if (!chatBox) return;
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-msg';
+            msgEl.innerHTML = `<span class="time">${time}</span><span class="author">${username}</span>${text}`;
+            chatBox.appendChild(msgEl);
+            // Автопрокрутка вниз к новым сообщениям
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            if (!input) return;
+            const text = input.value.trim();
+            if (text.length > 0) {
+                socket.emit('send-chat-message', text);
+                input.value = '';
+            }
+        }
+
+        // Надежная привязка отправки по кнопке и клавише Enter
+        document.addEventListener('DOMContentLoaded', () => {
+            const sendBtn = document.getElementById('chat-send-btn');
+            const chatInput = document.getElementById('chat-input');
+
+            if (sendBtn) {
+                sendBtn.onclick = sendChatMessage;
+            }
+            if (chatInput) {
+                chatInput.onkeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        sendChatMessage();
+                    }
+                };
+            }
+        });
+
+        function showError(msg) {
+            document.getElementById('error-box').innerText = msg;
+        }
+
+        function renderSeats(maxSeats, users, seatsData) {
+            const container = document.getElementById('table-container');
+            container.querySelectorAll('.seat').forEach(el => el.remove());
+
+            const radius = 110; // Новый больший радиус
+            const centerX = 140; // Центр для контейнера 280x280
+            const centerY = 140;
+
+            for (let i = 0; i < maxSeats; i++) {
+                const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
+                const x = centerX + radius * Math.cos(angle) - 20;
+                const y = centerY + radius * Math.sin(angle) - 20;
+
+                const seatEl = document.createElement('div');
+                seatEl.className = 'seat';
+                seatEl.id = `seat-${i}`;
+                seatEl.style.left = `${x}px`;
+                seatEl.style.top = `${y}px`;
+                seatEl.onclick = () => takeSeat(i);
+
+                const userIdInSeat = seatsData[i];
+                if (userIdInSeat) {
+                    const user = users[userIdInSeat];
+                    seatEl.classList.add('occupied');
+                    seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%;"><b>${user ? user.username : ''}</b>${user && !user.mic ? ' 🔇' : ''}</div>`;
+                } else {
+                    seatEl.classList.remove('occupied');
+                    seatEl.innerText = '+';
+                }
+
+                container.appendChild(seatEl);
+            }
+        }
+
+        function updateUI(users, seats) {
+            let allUsers = Object.values(users);
+            let totalCount = allUsers.length;
+            document.getElementById('users-count').innerText = `${totalCount} участников`;
+
+            const seatedUserIds = Object.values(seats);
+            const listeners = allUsers.filter(u => !seatedUserIds.includes(u.id));
+
+            document.getElementById('listeners-count-label').innerText = listeners.length;
+            const listContainer = document.getElementById('listeners-list-content');
+            listContainer.innerHTML = '';
+            if (listeners.length === 0) {
+                listContainer.innerHTML = '<div class="listener-item" style="color:#666;">Нет слушателей</div>';
+            } else {
+                listeners.forEach(l => {
+                    const div = document.createElement('div');
+                    div.className = 'listener-item';
+                    div.innerText = `👤 ${l.username}`;
+                    listContainer.appendChild(div);
+                });
+            }
+
+            const me = users[myId];
+            if (me) {
+                mySeat = me.seat;
+                const roleLabel = document.getElementById('role-label');
+                const seatBtn = document.getElementById('seat-action-btn');
+                const micBtn = document.getElementById('mic-btn');
+
+                if (mySeat !== null) {
+                    roleLabel.innerText = 'Режим: Спикер (за столом)';
+                    seatBtn.innerText = '🪑 Встать';
+                    micBtn.disabled = false;
+                } else {
+                    roleLabel.innerText = 'Режим: Наблюдатель';
+                    seatBtn.innerText = '🪑 Сесть';
+                    micBtn.disabled = true;
+                    if (isMicOn) toggleMic();
+                }
+
+                if (me.mic) {
+                    micBtn.classList.add('active');
+                    micBtn.innerText = '🎤 Мик: Вкл';
+                } else {
+                    micBtn.classList.remove('active');
+                    micBtn.innerText = '🎤 Мик: Выкл';
+                }
+            }
+        }
+
+        function toggleListenersPanel() {
+            isListenersPanelOpen = !isListenersPanelOpen;
+            const panel = document.getElementById('listeners-panel');
+            const btn = document.getElementById('listeners-toggle-btn');
+            if (isListenersPanelOpen) {
+                panel.classList.remove('hidden');
+                btn.classList.add('active');
+            } else {
+                panel.classList.add('hidden');
+                btn.classList.remove('active');
+            }
+        }
+
+        function takeSeat(seatIndex) {
+            if (mySeat !== null) return;
+            socket.emit('take-seat', seatIndex);
+        }
+
+        function handleSeatAction() {
+            if (mySeat !== null) {
+                socket.emit('leave-seat');
+            }
+        }
+
+        function leaveRoom() {
+            window.location.reload();
+        }
+
+        async function initLocalAudio() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                localStream.getAudioTracks()[0].enabled = false;
+            } catch (e) {
+                console.error('Ошибка доступа к микрофону:', e);
+            }
+        }
+
+        function toggleMic() {
+            if (mySeat === null) return;
+            isMicOn = !isMicOn;
+            if (localStream) {
+                localStream.getAudioTracks()[0].enabled = isMicOn;
+            }
+            socket.emit('toggle-media', { mic: isMicOn });
+        }
+
+        function toggleAudio() {
+            isAudioOn = !isAudioOn;
+            const audioBtn = document.getElementById('audio-btn');
+            if (isAudioOn) {
+                audioBtn.classList.add('active');
+                audioBtn.innerText = '🔊 Звук: Вкл';
+            } else {
+                audioBtn.classList.remove('active');
+                audioBtn.innerText = '🔊 Звук: Выкл';
+            }
+        }
+    </script>
+</body>
