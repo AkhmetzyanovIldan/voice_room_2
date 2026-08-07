@@ -154,6 +154,8 @@ io.on('connection', (socket) => {
             if (Object.keys(room.users).length === 0) {
                 delete rooms[roomId];
             } else {
+                // Оповещаем оставшихся участников о том, что этот socket.id отключился
+                io.to(roomId).emit('user-disconnected', socket.id);
                 emitRoomUpdate(roomId);
             }
         }

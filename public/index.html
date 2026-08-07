@@ -512,9 +512,30 @@
             return pc;
         }
 
+        // Функция для удаления соединения
+        function closePeerConnection(userId) {
+            if (peers[userId]) {
+                peers[userId].close();
+                delete peers[userId];
+            }
+            const audioEl = document.getElementById(`audio-${userId}`);
+            if (audioEl) {
+                audioEl.srcObject = null;
+                audioEl.remove();
+            }
+        }
+
+        // Слушатель на случай, если кто-то вышел из комнаты
+        socket.on('user-disconnected', (userId) => {
+            closePeerConnection(userId);
+        });
+
         async function callUser(targetId) {
+            // Звоним только если наш socket.id больше (или меньше) ID собеседника.
+            // Это гарантирует, что оффер отправит только один из них.
+            if (socket.id > targetId) return; 
+
             let pc = createPeerConnection(targetId);
-            // Предотвращаем дублирование офферов, если уже создано
             if (pc.signalingState === "stable") {
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
