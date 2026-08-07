@@ -423,6 +423,7 @@
                 console.log("Микрофон успешно подключен");
             } catch (err) {
                 console.warn("Не удалось получить доступ к микрофону, продолжаем без него:", err);
+                localStream = null; // Не падаем с ошибкой, а продолжаем работу
             }
         }
 
@@ -509,6 +510,15 @@
                 audioEl.srcObject = event.streams[0];
             };
 
+            // Логируем состояние WebRTC-соединения
+            pc.onconnectionstatechange = (event) => {
+                console.log(`🔗 Статус WebRTC с ${targetId}:`, pc.connectionState);
+            };
+
+            pc.oniceconnectionstatechange = (event) => {
+                console.log(`🧊 Статус ICE с ${targetId}:`, pc.iceConnectionState);
+            };
+            
             return pc;
         }
 
