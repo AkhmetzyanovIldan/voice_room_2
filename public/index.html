@@ -6,6 +6,8 @@
     <title>Голосовой чат</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/socket.io/socket.io.js"></script>
+    <!-- Подключаем LiveKit Client SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
         body { background-color: #121212; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; overscroll-behavior: none; }
@@ -161,18 +163,12 @@
         let currentRoomId = null;
         let myId = null;
         let mySeat = null;
-        let isMicOn = false;
         let isAudioOn = true;
-        let localStream = null;
         let isListenersPanelOpen = false;
 
-        const peers = {}; // socketId -> RTCPeerConnection
-        const stunsServers = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        };
+        // Переменные для LiveKit
+        let lkRoom = null;
+        const LIVEKIT_URL = "wss://voice-room-1-n44qy5e7.livekit.cloud";
 
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             document.getElementById('username-input').value = tg.initDataUnsafe.user.first_name;
@@ -188,15 +184,10 @@
             document.getElementById('modal-overlay').classList.remove('hidden');
         }
 
-        // Запрос микрофона и создание комнаты
-        async function confirmCreateRoom() {
-            await initAudio();
+        function confirmCreateRoom() {
             const roomName = document.getElementById('room-name-input').value.trim();
             const username = document.getElementById('username-input').value.trim() || 'Игрок';
-            
-            // Получаем аватарку из Telegram (если ее нет — отправляем пустую строку)
             const photoUrl = (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.photo_url) ? tg.initDataUnsafe.user.photo_url : '';
-            
             const maxSeats = document.getElementById('input-max-seats').value;
             const hasChat = document.getElementById('input-has-chat').checked;
 
@@ -204,21 +195,18 @@
             socket.emit('create-room', { roomName, username, photoUrl, maxSeats, hasChat });
         }
 
-        // Запрос микрофона и вход в комнату
-        document.getElementById('join-btn').onclick = async () => {
+        document.getElementById('join-btn').onclick = () => {
             const roomId = document.getElementById('room-code-input').value.trim();
             const username = document.getElementById('username-input').value.trim() || 'Игрок';
             if (!roomId) return showError('Введите код комнаты');
 
             const photoUrl = (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.photo_url) ? tg.initDataUnsafe.user.photo_url : '';
-
-            await initAudio();
             socket.emit('join-room', { roomId, username, photoUrl });
         };
 
         socket.on('error-msg', (msg) => showError(msg));
 
-        socket.on('room-joined', ({ roomId, roomName }) => {
+        socket.on('room-joined', async ({ roomId, roomName }) => {
             currentRoomId = roomId;
             myId = socket.id;
             document.getElementById('modal-overlay').classList.add('hidden');
@@ -227,6 +215,42 @@
             
             document.getElementById('room-title-display').innerText = roomName;
             document.getElementById('room-code-display').innerText = roomId;
+
+            const username = document.getElementById('username-input').value.trim() || 'Игрок';
+            socket.emit('get-livekit-token', { username, roomId });
+        });
+
+        // Слушатель токена зарегистрирован один раз глобально, чтобы избежать дублирования
+        socket.on('livekit-token', async (token) => {
+            try {
+                if (lkRoom) {
+                    await lkRoom.disconnect();
+                }
+
+                const { Room, RoomEvent } = LivekitClient;
+                lkRoom = new Room();
+
+                lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    if (track.kind === 'audio') {
+                        const element = track.attach();
+                        element.muted = !isAudioOn;
+                        element.dataset.participantId = participant.identity;
+                        document.body.appendChild(element);
+                    }
+                });
+
+                lkRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
+                    if (track.kind === 'audio') {
+                        track.detach().forEach(el => el.remove());
+                    }
+                });
+
+                await lkRoom.connect(LIVEKIT_URL, token);
+                console.log("Успешно подключились к LiveKit комнате");
+            } catch (error) {
+                console.error("Ошибка подключения к LiveKit:", error);
+                showError("Не удалось подключиться к голосовому серверу");
+            }
         });
 
         socket.on('update-room', ({ roomName, maxSeats, hasChat, users, seats }) => {
@@ -241,16 +265,8 @@
 
             renderSeats(maxSeats, users, seats);
             updateUI(users, seats);
-
-            // Автоматически устанавливаем WebRTC соединение со всеми участниками в комнате
-            Object.keys(users).forEach(userId => {
-                if (userId !== socket.id) {
-                    callUser(userId);
-                }
-            });
         });
     
-        // Чат
         socket.on('chat-message', ({ username, text, time }) => {
             const chatBox = document.getElementById('chat-messages');
             if (!chatBox) return;
@@ -315,21 +331,19 @@
                     const user = users[userIdInSeat];
                     seatEl.classList.add('occupied');
 
-                    // Если есть аватарка из Телеграма, показываем её, иначе инициал
                     if (user && user.photoUrl) {
                         seatEl.innerHTML = `<img src="${user.photoUrl}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`;
                     } else {
                         seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%; font-size:11px;"><b>${user ? user.username[0] : ''}</b></div>`;
                     }
 
-                    // Значок заглушенного микрофона поверх аватарки
                     if (user && !user.mic) {
-                        seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%;"><b>${user ? user.username : ''}</b>${user && !user.mic ? ' 🔇' : ''}</div>`;
+                        seatEl.innerHTML += `<div style="position:absolute; bottom:0; right:0; font-size:10px;">🔇</div>`;
                     }
-                    } else {
-                        seatEl.classList.remove('occupied');
-                        seatEl.innerText = '+';
-                    }
+                } else {
+                    seatEl.classList.remove('occupied');
+                    seatEl.innerText = '+';
+                }
 
                 container.appendChild(seatEl);
             }
@@ -372,15 +386,12 @@
                     roleLabel.innerText = 'Режим: Наблюдатель';
                     seatBtn.innerText = '🪑 Сесть';
                     micBtn.disabled = true;
-                    if (isMicOn) toggleMic();
-                }
-
-                if (me.mic) {
-                    micBtn.classList.add('active');
-                    micBtn.innerText = '🎤 Мик: Вкл';
-                } else {
-                    micBtn.classList.remove('active');
-                    micBtn.innerText = '🎤 Мик: Выкл';
+                    
+                    if (lkRoom && lkRoom.localParticipant && lkRoom.localParticipant.isMicrophoneEnabled) {
+                        lkRoom.localParticipant.setMicrophoneEnabled(false);
+                        updateMicButtonUI(false);
+                        socket.emit('toggle-media', { mic: false });
+                    }
                 }
             }
         }
@@ -405,40 +416,58 @@
 
         function handleSeatAction() {
             if (mySeat !== null) {
+                if (lkRoom && lkRoom.localParticipant && lkRoom.localParticipant.isMicrophoneEnabled) {
+                    lkRoom.localParticipant.setMicrophoneEnabled(false);
+                    updateMicButtonUI(false);
+                    socket.emit('toggle-media', { mic: false });
+                }
                 socket.emit('leave-seat');
             }
         }
 
         function leaveRoom() {
+            if (lkRoom) {
+                lkRoom.disconnect();
+                lkRoom = null;
+            }
             window.location.reload();
         }
 
-        // --- WebRTC Голосовая связь ---
-        async function initAudio() {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: true, noiseSuppression: true }, 
-                    video: false 
-                });
-                console.log("Микрофон успешно подключен");
-            } catch (err) {
-                console.warn("Не удалось получить доступ к микрофону, продолжаем без него:", err);
-                localStream = null; // Не падаем с ошибкой, а продолжаем работу
+        function updateMicButtonUI(isOn) {
+            const micBtn = document.getElementById('mic-btn');
+            if (isOn) {
+                micBtn.classList.add('active');
+                micBtn.innerText = '🎤 Мик: Вкл';
+            } else {
+                micBtn.classList.remove('active');
+                micBtn.innerText = '🎤 Мик: Выкл';
             }
         }
 
-        function toggleMic() {
-            if (mySeat === null || !localStream) return;
-            isMicOn = !isMicOn;
-            localStream.getAudioTracks()[0].enabled = isMicOn;
-            socket.emit('toggle-media', { mic: isMicOn });
+        async function toggleMic() {
+            if (mySeat === null || !lkRoom) {
+                console.warn("Попытка включить микрофон вне стола или без LiveKit");
+                return;
+            }
+            
+            const currentStatus = lkRoom.localParticipant.isMicrophoneEnabled;
+            const newStatus = !currentStatus;
+            
+            try {
+                console.log("Переключаем микрофон в LiveKit:", newStatus);
+                await lkRoom.localParticipant.setMicrophoneEnabled(newStatus);
+                updateMicButtonUI(newStatus);
+                socket.emit('toggle-media', { mic: newStatus });
+            } catch (err) {
+                console.error("Критическая ошибка микрофона:", err);
+                alert("Не удалось включить микрофон. Проверьте разрешения браузера.");
+            }
         }
 
         function toggleAudio() {
             isAudioOn = !isAudioOn;
             const audioBtn = document.getElementById('audio-btn');
             
-            // Включаем/выключаем звук всех удаленных аудиоэлементов
             document.querySelectorAll('audio').forEach(el => {
                 el.muted = !isAudioOn;
             });
@@ -449,125 +478,6 @@
             } else {
                 audioBtn.classList.remove('active');
                 audioBtn.innerText = '🔊 Звук: Выкл';
-            }
-        }
-
-        socket.on('webrtc-offer', async ({ senderId, offer }) => {
-            let pc = createPeerConnection(senderId);
-            await pc.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit('webrtc-answer', { targetId: senderId, answer });
-        });
-
-        socket.on('webrtc-answer', async ({ senderId, answer }) => {
-            let pc = peers[senderId];
-            if (pc) {
-                await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            }
-        });
-
-        socket.on('webrtc-ice-candidate', async ({ senderId, candidate }) => {
-            let pc = peers[senderId];
-            if (pc && candidate) {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            }
-        });
-
-        function createPeerConnection(targetId) {
-            if (peers[targetId]) return peers[targetId];
-
-            const pc = new RTCPeerConnection({
-                iceServers: [
-                    {
-                        urls: "stun:stun.relay.metered.ca:80",
-                    },
-                    {
-                        urls: "turn:global.relay.metered.ca:80",
-                        username: "00895e0ee105bb4f6efc3a22",
-                        credential: "hKzZbFTBsA37C6E/",
-                    },
-                    {
-                        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-                        username: "00895e0ee105bb4f6efc3a22",
-                        credential: "hKzZbFTBsA37C6E/",
-                    },
-                    {
-                        urls: "turn:global.relay.metered.ca:443",
-                        username: "00895e0ee105bb4f6efc3a22",
-                        credential: "hKzZbFTBsA37C6E/",
-                    },
-                    {
-                        urls: "turns:global.relay.metered.ca:443?transport=tcp",
-                        username: "00895e0ee105bb4f6efc3a22",
-                        credential: "hKzZbFTBsA37C6E/",
-                    },
-                ],
-            });
-            peers[targetId] = pc;
-
-            if (localStream) {
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-            }
-
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.emit('webrtc-ice-candidate', { targetId, candidate: event.candidate });
-                }
-            };
-
-            pc.ontrack = (event) => {
-                let audioEl = document.getElementById(`audio-${targetId}`);
-                if (!audioEl) {
-                    audioEl = document.createElement('audio');
-                    audioEl.id = `audio-${targetId}`;
-                    audioEl.autoplay = true;
-                    audioEl.muted = !isAudioOn;
-                    document.body.appendChild(audioEl);
-                }
-                audioEl.srcObject = event.streams[0];
-            };
-
-            // Логируем состояние WebRTC-соединения
-            pc.onconnectionstatechange = (event) => {
-                console.log(`🔗 Статус WebRTC с ${targetId}:`, pc.connectionState);
-            };
-
-            pc.oniceconnectionstatechange = (event) => {
-                console.log(`🧊 Статус ICE с ${targetId}:`, pc.iceConnectionState);
-            };
-
-            return pc;
-        }
-
-        // Функция для удаления соединения
-        function closePeerConnection(userId) {
-            if (peers[userId]) {
-                peers[userId].close();
-                delete peers[userId];
-            }
-            const audioEl = document.getElementById(`audio-${userId}`);
-            if (audioEl) {
-                audioEl.srcObject = null;
-                audioEl.remove();
-            }
-        }
-
-        // Слушатель на случай, если кто-то вышел из комнаты
-        socket.on('user-disconnected', (userId) => {
-            closePeerConnection(userId);
-        });
-
-        async function callUser(targetId) {
-            // Звоним только если наш socket.id больше (или меньше) ID собеседника.
-            // Это гарантирует, что оффер отправит только один из них.
-            if (socket.id > targetId) return; 
-
-            let pc = createPeerConnection(targetId);
-            if (pc.signalingState === "stable") {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                socket.emit('webrtc-offer', { targetId, offer });
             }
         }
     </script>
