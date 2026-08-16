@@ -9,8 +9,8 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // Ваши настройки LiveKit Cloud
-const LK_API_KEY = "APIGfJceZTESFgY";
-const LK_API_SECRET = "i2w2iPVvc78CfUkHV8gOF7eFh2P66NNeB8fF9d1CpJCA";
+const LK_API_KEY = "API32YvgsLPxepo";
+const LK_API_SECRET = "6CuUqh4f22Rnw4fT5ETd3nQwHYyyKsyUZeRGNzca8itA";
 
 app.use(express.static(path.join(__dirname, 'public')));
 
