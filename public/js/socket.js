@@ -47,6 +47,9 @@
   socket.on('timer-tick', (d) => emitter.emit('timer-tick', d));
   socket.on('discussion-started', (d) => emitter.emit('discussion-started', d));
   socket.on('game-ended', (d) => emitter.emit('game-ended', d));
+  socket.on('night-started', (d) => emitter.emit('night-started', d));
+  socket.on('night-result', (d) => emitter.emit('night-result', d));
+  socket.on('cop-result', (d) => emitter.emit('cop-result', d));
 
   // expose API
   window.appSocket = {

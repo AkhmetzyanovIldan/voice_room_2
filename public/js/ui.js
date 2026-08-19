@@ -38,7 +38,7 @@
   // Helpers from former app.js
   function showError(msg) { const el = document.getElementById('error-box'); if (el) el.innerText = msg || ''; }
 
-  function renderSeats(maxSeats, users, seatsData, currentSpeakerId) {
+  function renderSeats(maxSeats, users, seatsData, currentSpeakerId, gameStatus) {
     const container = document.getElementById('table-container');
     if (!container) return;
     container.querySelectorAll('.seat').forEach(el => el.remove());
@@ -57,7 +57,6 @@
       seatEl.id = `seat-${i}`;
       seatEl.style.left = `${x}px`;
       seatEl.style.top = `${y}px`;
-      seatEl.onclick = () => takeSeat(i);
 
       const userIdInSeat = seatsData[i];
       if (userIdInSeat) {
@@ -74,9 +73,38 @@
 
         if (user && !user.mic) seatEl.innerHTML += `<div style="position:absolute; bottom:0; right:0; font-size:10px;">🔇</div>`;
         if (user && user.isReady) seatEl.innerHTML += `<div style="position:absolute; top:0; right:0; font-size:10px; background:rgba(0,255,0,0.7); border-radius:50%; width:12px; height:12px; text-align:center; line-height:12px;">✓</div>`;
+        if (user && user.isAlive === false) seatEl.innerHTML += `<div style="position:absolute; top:0; left:0; font-size:12px;">☠️</div>`;
+
+        // If it's night and current user can act and is alive, clicking a seat is a night action
+        const me = users && users[myId];
+        const myRole = window.myRole; // private role stored from personal 'game-started' event
+        if (gameStatus === 'night' && me && me.isAlive && myRole && ['mafia','doctor','cop'].includes(myRole)) {
+          // clicking targets another player
+          seatEl.style.cursor = 'pointer';
+          seatEl.onclick = () => {
+            if (userIdInSeat === myId) { console.log('night-action: cannot target self'); return; } // don't target self
+            const actionType = myRole === 'mafia' ? 'mafia_kill' : myRole === 'doctor' ? 'doctor_heal' : myRole === 'cop' ? 'cop_check' : null;
+            if (!actionType) return;
+            if (!currentRoomId) { console.warn('no currentRoomId'); return; }
+            console.log('emitting night-action', { roomId: currentRoomId, targetId: userIdInSeat, actionType, myRole });
+            window.appSocket.socket.emit('night-action', { roomId: currentRoomId, targetId: userIdInSeat, actionType });
+          };
+        } else {
+          // default click: take seat when empty; occupied seats do nothing outside night
+          seatEl.onclick = () => { /* no-op for occupied seat */ };
+        }
+
+        // show if this seat is the one we selected this night
+        if (window.myNightTargetId && window.myNightTargetId === userIdInSeat) {
+          if (!seatEl.querySelector('.target-marker')) {
+            const m = document.createElement('div'); m.className = 'target-marker'; m.style.position='absolute'; m.style.bottom='-6px'; m.style.left='50%'; m.style.transform='translateX(-50%)'; m.style.fontSize='10px'; m.innerText = '🎯 ВЫ'; seatEl.appendChild(m);
+          }
+        }
+
       } else {
         seatEl.classList.remove('occupied');
         seatEl.innerText = '+';
+        seatEl.onclick = () => takeSeat(i);
       }
 
       container.appendChild(seatEl);
@@ -101,12 +129,40 @@
     if (me) {
       mySeat = me.seat;
 
+      // show personal role in top corner if available (only visible to you)
+      const playerRoleEl = document.getElementById('player-role');
+      if (playerRoleEl) playerRoleEl.innerText = window.myRole ? `Вы - ${window.myRole}` : 'Вы - —';
+
       if (mySeat !== null) {
         const roleLabel = document.getElementById('role-label'); if (roleLabel) roleLabel.innerText = 'Режим: Спикер (за столом)';
         if (seatActionBtn) seatActionBtn.innerText = '🪑 Встать';
 
-        if (gameStatus === 'waiting') { if (readyBtn) readyBtn.style.display = 'inline-block'; if (micBtn) micBtn.disabled = false; }
-        else { if (readyBtn) readyBtn.style.display = 'none'; if (gameStatus === 'playing') { if (micBtn) micBtn.disabled = (window.appSocket.socket.id !== window.currentActiveSpeakerId); } else if (gameStatus === 'discussion') { if (micBtn) micBtn.disabled = false; } }
+        // ready button behavior: visible in waiting, show 'Не готов' when active
+        if (gameStatus === 'waiting') {
+          if (readyBtn) readyBtn.style.display = 'inline-block';
+          if (micBtn) micBtn.disabled = false;
+          if (readyBtn) {
+            if (me.isReady) {
+              readyBtn.innerText = 'Не готов';
+              readyBtn.classList.add('ready-on');
+            } else {
+              readyBtn.innerText = 'Готов к игре';
+              readyBtn.classList.remove('ready-on');
+            }
+          }
+        } else {
+          if (readyBtn) readyBtn.style.display = 'none';
+          if (gameStatus === 'day_speeches') {
+            if (micBtn) micBtn.disabled = (window.appSocket.socket.id !== window.currentActiveSpeakerId);
+          } else if (gameStatus === 'day_discussion') {
+            if (micBtn) micBtn.disabled = false;
+          } else if (gameStatus === 'night') {
+            // during night, mics must be locked
+            if (micBtn) micBtn.disabled = true;
+          } else {
+            if (micBtn) micBtn.disabled = true;
+          }
+        }
       } else {
         const roleLabel = document.getElementById('role-label'); if (roleLabel) roleLabel.innerText = 'Режим: Наблюдатель';
         if (seatActionBtn) seatActionBtn.innerText = '🪑 Сесть';
@@ -219,18 +275,70 @@
     } catch (error) { console.error('LiveKit connect error', error); showError('Не удалось подключиться к голосовому серверу'); }
   });
 
+  // track my selected night target locally
+  window.myNightTargetId = null;
+
   appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
     const chatContainer = document.querySelector('.chat-container'); if (chatContainer) { if (hasChat === false) chatContainer.classList.add('hidden'); else chatContainer.classList.remove('hidden'); }
-    renderSeats(maxSeats, users, seats, currentSpeakerId);
+    // keep last room state for helpers
+    window.__lastRoomState = { users, seats, gameStatus };
+    renderSeats(maxSeats, users, seats, currentSpeakerId, gameStatus);
     updateUI(users, seats, gameStatus);
+
+  // Ensure local microphone follows server-authoritative state (do NOT emit toggle to server here)
+  try {
+    const me = users && users[myId];
+    if (me && window.lkRoom && window.lkRoom.localParticipant) {
+      const desired = !!me.mic;
+      const local = !!window.lkRoom.localParticipant.isMicrophoneEnabled;
+      if (desired !== local) {
+        window.lkRoom.localParticipant.setMicrophoneEnabled(desired).then(() => { updateMicButtonUI(desired); }).catch(e => console.error('Failed to set local mic according to server state', e));
+      }
+    }
+  } catch (e) { /* ignore errors */ }
+  });
+
+  // acknowledge of night action from server (private)
+  window.appSocket.socket.on('night-action-ack', ({ actionType, targetId, accepted }) => {
+    console.log('night-action-ack', { actionType, targetId, accepted });
+    if (accepted) {
+      window.myNightTargetId = targetId;
+      // immediate visual feedback: add marker to seat if present
+      const idx = getSeatIndexByUserId(targetId);
+      if (idx !== -1) {
+        const targetEl = document.getElementById(`seat-${idx}`);
+        if (targetEl) {
+          const existing = targetEl.querySelector('.target-marker');
+          if (!existing) {
+            const m = document.createElement('div'); m.className = 'target-marker'; m.style.position='absolute'; m.style.bottom='-6px'; m.style.left='50%'; m.style.transform='translateX(-50%)'; m.style.fontSize='10px'; m.innerText = '🎯 ВЫ'; targetEl.appendChild(m);
+          }
+        }
+      }
+    } else {
+      alert('Действие не принято (возможно вы не имеете права или фаза не та)');
+    }
   });
 
   appEvents.on('chat-message', ({ username, text, time }) => {
     if (!chatMessages) return; const msgEl = document.createElement('div'); msgEl.className = 'chat-msg'; msgEl.innerHTML = `<span class="time">${time}</span><span class="author">${username}</span>${text}`; chatMessages.appendChild(msgEl); chatMessages.scrollTop = chatMessages.scrollHeight;
   });
 
-  appEvents.on('game-started', ({ roomStatus }) => { if (readyBtn) readyBtn.style.display = 'none'; const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '🎮 Игра началась! Идет фаза личных высказываний.'; });
+  appEvents.on('game-started', (data) => {
+    if (readyBtn) readyBtn.style.display = 'none';
+    const statusEl = document.getElementById('game-status-text');
+    if (data && data.role) {
+      // personal role notification (private event)
+      const role = data.role;
+      const playerRoleEl = document.getElementById('player-role'); if (playerRoleEl) playerRoleEl.innerText = `Вы - ${role}`;
+      window.myRole = role;
+      if (statusEl) statusEl.innerText = `🎮 Игра началась — ваша роль: ${role}. Сейчас ночь.`;
+    } else if (data && data.roomStatus) {
+      if (statusEl) statusEl.innerText = '🎮 Игра началась! Идет фаза личных высказываний.';
+    } else {
+      if (statusEl) statusEl.innerText = '🎮 Игра началась!';
+    }
+  });
 
   appEvents.on('turn-changed', ({ activePlayerId, timeLeft }) => {
     window.currentActiveSpeakerId = activePlayerId;
@@ -245,6 +353,39 @@
 
   appEvents.on('discussion-started', ({ timeLeft }) => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerHTML = "💬 <span style='color: #00bcd4;'>ФАЗА ОБЩЕГО ОБСУЖДЕНИЯ! Микрофоны доступны.</span>"; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `💬 Общее обсуждение. Осталось: ${timeLeft}с`; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && !window.lkRoom.localParticipant.isMicrophoneEnabled) { window.lkRoom.localParticipant.setMicrophoneEnabled(true).then(() => { updateMicButtonUI(true); appSocket.toggleMedia(true); }).catch(e => console.error(e)); } });
 
-  appEvents.on('game-ended', () => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '🏁 Игра окончена. Можете общаться или начать новую.'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = 'Игра завершена'; if (mySeat !== null && readyBtn) { readyBtn.style.display = 'inline-block'; readyBtn.innerText = 'Готов к игре'; readyBtn.classList.remove('ready-on'); } });
+  // Ночь — выключаем микрофоны у всех
+  appEvents.on('night-started', ({ timeLeft }) => {
+    // reset local night selection
+    window.myNightTargetId = null;
+
+    const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerHTML = "🌃 <span style='color: #607d8b;'>Ночь. Все микрофоны выключены.</span>";
+    const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `🌃 Ночь. Осталось: ${timeLeft}с`;
+    // выключаем локальный микрофон
+    if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && window.lkRoom.localParticipant.isMicrophoneEnabled) {
+      window.lkRoom.localParticipant.setMicrophoneEnabled(false).then(() => { updateMicButtonUI(false); appSocket.toggleMedia(false); }).catch(e => console.error(e));
+    }
+  });
+
+  // Результаты ночи
+  appEvents.on('night-result', ({ killedPlayerName }) => {
+    const statusEl = document.getElementById('game-status-text');
+    if (killedPlayerName) {
+      alert(`Этой ночью был убит: ${killedPlayerName}`);
+      if (statusEl) statusEl.innerText = `🔪 Ночь завершена. Погиб: ${killedPlayerName}`;
+    } else {
+      alert('Прошла спокойная ночь');
+      if (statusEl) statusEl.innerText = '🌙 Ночь прошла спокойно.';
+    }
+  });
+
+  // Результат проверки комиссара (личное сообщение)
+  appEvents.on('cop-result', ({ isMafia }) => {
+    alert(isMafia ? 'Проверенный игрок является МАФИЕЙ' : 'Проверенный игрок НЕ мафия');
+  });
+
+  appEvents.on('game-ended', () => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '🏁 Игра окончена. Можете общаться или начать новую.'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = 'Игра завершена'; if (mySeat !== null && readyBtn) { readyBtn.style.display = 'inline-block'; readyBtn.innerText = 'Готов к игре'; readyBtn.classList.remove('ready-on'); }
+    // clear private role after game
+    window.myRole = null; const playerRoleEl = document.getElementById('player-role'); if (playerRoleEl) playerRoleEl.innerText = 'Вы - —';
+  });
 
 })();
