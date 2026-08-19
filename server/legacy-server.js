@@ -8,9 +8,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Ваши настройки LiveKit Cloud
-const LK_API_KEY = "API32YvgsLPxepo";
-const LK_API_SECRET = "6CuUqh4f22Rnw4fT5ETd3nQwHYyyKsyUZeRGNzca8itA";
+// Load secrets from server config or environment (do not hardcode secrets here)
+const config = require('./config');
+const LK_API_KEY = config.LK_API_KEY;
+const LK_API_SECRET = config.LK_API_SECRET;
+const LIVEKIT_URL = config.LIVEKIT_URL;
+
+if (!LK_API_KEY || !LK_API_SECRET || !LIVEKIT_URL) {
+    console.warn('LiveKit configuration missing in legacy-server.js — get-livekit-token will return null token');
+}
 
 app.use(express.static(path.join(__dirname, 'public')));
 
