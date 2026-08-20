@@ -53,6 +53,7 @@
   socket.on('cop-result', (d) => emitter.emit('cop-result', d));
   socket.on('voting-started', (d) => emitter.emit('voting-started', d));
   socket.on('day-vote-result', (d) => emitter.emit('day-vote-result', d));
+  socket.on('last-word-started', (d) => emitter.emit('last-word-started', d));
 
   // expose API
   window.appSocket = {

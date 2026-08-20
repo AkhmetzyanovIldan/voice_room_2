@@ -138,7 +138,9 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
       const user = room.users[socket.id];
       if (!user || user.seat === null) return;
 
-      if (room.gameStatus === 'day_speeches') {
+      if (room.gameStatus === 'last_words') {
+        if (room.lastWordPlayerId !== socket.id) return;
+      } else if (room.gameStatus === 'day_speeches') {
         const activePlayer = room.turnOrder && room.turnOrder[room.currentTurnIndex];
         if (!activePlayer) return;
         if (activePlayer.id !== socket.id) return;

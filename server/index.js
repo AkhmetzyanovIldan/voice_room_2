@@ -56,7 +56,8 @@ io.on('connection', (socket) => {
       nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null }
       ,
       votes: {},
-      nightActionActors: {}
+      nightActionActors: {},
+      lastWordPlayerId: null
     };
 
     joinRoomLogic(socket, roomId, username, photoUrl);
@@ -155,6 +156,8 @@ io.on('connection', (socket) => {
         // Игрок неактивен — отклоняем запрос
         return;
       }
+    } else if (room.gameStatus === 'last_words') {
+      if (room.lastWordPlayerId !== socket.id) return;
     } else if (room.gameStatus === 'day_discussion' || room.gameStatus === 'waiting') {
       // разрешено
     } else {
@@ -280,6 +283,7 @@ function emitRoomUpdate(roomId) {
     users: publicUsers,
     seats: room.seats,
     gameStatus: room.gameStatus,
+    lastWordPlayerId: room.lastWordPlayerId,
     votes: Object.keys(room.votes || {}),
     currentSpeakerId: currentSpeakerId
   });
@@ -409,9 +413,10 @@ function resolveNight(roomId) {
   const winner = checkVictory(room);
   io.to(roomId).emit('night-result', { killedPlayerName, winner });
 
-  // short pause to show result, then go to day speeches
+  // Show the death, then give the eliminated player a last word.
   setTimeout(() => {
     if (winner) endGame(roomId, winner);
+    else if (killedPlayerName && mafiaTarget) startLastWordPhase(roomId, mafiaTarget, 'speeches');
     else startDaySpeechesPhase(roomId);
   }, 5000);
 }
@@ -484,6 +489,7 @@ function startDayVoting(roomId) {
   room.gameStatus = 'day_voting';
   room.votes = {};
   room.nightActionActors = {};
+  room.lastWordPlayerId = null;
   let timeLeft = 30;
   io.to(roomId).emit('voting-started', { timeLeft });
   emitRoomUpdate(roomId);
@@ -534,7 +540,45 @@ function resolveDayVote(roomId) {
     winner
   });
   if (winner) setTimeout(() => endGame(roomId, winner), 3000);
+  else if (eliminated) setTimeout(() => startLastWordPhase(roomId, eliminated.id, 'night'), 3000);
   else setTimeout(() => startNightPhase(roomId), 3000);
+}
+
+function startLastWordPhase(roomId, playerId, nextPhase) {
+  const room = rooms[roomId];
+  const player = room && room.users[playerId];
+  if (!room || !player) {
+    if (nextPhase === 'night') startNightPhase(roomId);
+    else startDaySpeechesPhase(roomId);
+    return;
+  }
+
+  room.gameStatus = 'last_words';
+  room.lastWordPlayerId = playerId;
+  Object.values(room.users).forEach(u => { u.mic = u.id === playerId; });
+  const timeLeft = 15;
+  io.to(roomId).emit('last-word-started', {
+    playerId,
+    playerName: player.username,
+    timeLeft,
+    nextPhase
+  });
+  emitRoomUpdate(roomId);
+  clearInterval(room.timer);
+  room.timer = setInterval(() => {
+    const remaining = timeLeft - Math.floor((Date.now() - room.lastWordStartedAt) / 1000);
+    io.to(roomId).emit('timer-tick', { timeLeft: Math.max(remaining, 0) });
+    if (remaining <= 0) {
+      clearInterval(room.timer);
+      room.timer = null;
+      player.mic = false;
+      room.lastWordPlayerId = null;
+      emitRoomUpdate(roomId);
+      if (nextPhase === 'night') startNightPhase(roomId);
+      else startDaySpeechesPhase(roomId);
+    }
+  }, 1000);
+  room.lastWordStartedAt = Date.now();
 }
 
 // keep startDiscussionPhase as a compatibility wrapper
@@ -557,6 +601,7 @@ function endGame(roomId, winner = null) {
   room.nightActionActors = {};
   room.turnOrder = [];
   room.currentTurnIndex = 0;
+  room.lastWordPlayerId = null;
 
   io.to(roomId).emit('game-ended', { winner });
   emitRoomUpdate(roomId);

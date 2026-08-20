@@ -14,6 +14,7 @@ function createRoom(roomId: string, opts: Partial<Room>) {
     enabledRoles: (opts && (opts as any).enabledRoles) || ['mafia', 'cop', 'doctor'],
     votes: {},
     nightActionActors: {},
+    lastWordPlayerId: null,
     users: {},
     seats: [],
     gameStatus: 'waiting',

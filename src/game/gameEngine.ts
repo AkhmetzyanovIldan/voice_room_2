@@ -26,6 +26,8 @@ export function createGameEngine(io: Server) {
     let currentSpeakerId: string | null = null;
     if (room.gameStatus === 'day_speeches' && room.turnOrder && room.turnOrder[room.currentTurnIndex]) {
       currentSpeakerId = room.turnOrder[room.currentTurnIndex].id;
+    } else if (room.gameStatus === 'last_words') {
+      currentSpeakerId = room.lastWordPlayerId;
     }
 
     const publicUsers: Record<string, Partial<Player>> = {};
@@ -50,6 +52,7 @@ export function createGameEngine(io: Server) {
       users: publicUsers,
       seats: room.seats,
       gameStatus: room.gameStatus,
+      lastWordPlayerId: room.lastWordPlayerId,
       currentSpeakerId: currentSpeakerId
     });
   }
@@ -142,6 +145,7 @@ export function createGameEngine(io: Server) {
 
     setTimeout(() => {
       if (winner) endGame(roomId, winner);
+      else if (killedPlayerName && mafiaTarget) startLastWordPhase(roomId, mafiaTarget, 'speeches');
       else startDaySpeechesPhase(roomId);
     }, 5000);
   }
@@ -272,7 +276,38 @@ export function createGameEngine(io: Server) {
       winner
     });
     if (winner) setTimeout(() => endGame(roomId, winner), 3000);
+    else if (eliminated) setTimeout(() => startLastWordPhase(roomId, eliminated.id, 'night'), 3000);
     else setTimeout(() => startNightPhase(roomId), 3000);
+  }
+
+  function startLastWordPhase(roomId: string, playerId: string, nextPhase: 'night' | 'speeches') {
+    const room = getRoom(roomId) as Room | undefined;
+    const player = room && room.users[playerId];
+    if (!room || !player) {
+      if (nextPhase === 'night') startNightPhase(roomId);
+      else startDaySpeechesPhase(roomId);
+      return;
+    }
+    room.gameStatus = 'last_words';
+    room.lastWordPlayerId = playerId;
+    Object.values(room.users).forEach((u) => { u.mic = u.id === playerId; });
+    let timeLeft = 15;
+    io.to(roomId).emit('last-word-started', { playerId, playerName: player.username, timeLeft, nextPhase });
+    emitRoomUpdate(roomId);
+    clearInterval(room.timer);
+    room.timer = setInterval(() => {
+      timeLeft--;
+      io.to(roomId).emit('timer-tick', { timeLeft: Math.max(timeLeft, 0) });
+      if (timeLeft <= 0) {
+        clearInterval(room.timer);
+        room.timer = null;
+        player.mic = false;
+        room.lastWordPlayerId = null;
+        emitRoomUpdate(roomId);
+        if (nextPhase === 'night') startNightPhase(roomId);
+        else startDaySpeechesPhase(roomId);
+      }
+    }, 1000) as unknown as NodeJS.Timeout;
   }
 
   function submitDayVote(voterId: string, targetId: string) {
@@ -302,6 +337,7 @@ export function createGameEngine(io: Server) {
     room.nightActionActors = {};
     room.turnOrder = [];
     room.currentTurnIndex = 0;
+    room.lastWordPlayerId = null;
 
     io.to(roomId).emit('game-ended', { winner });
     emitRoomUpdate(roomId);

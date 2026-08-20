@@ -238,6 +238,8 @@
           } else if (gameStatus === 'night') {
             // during night, mics must be locked
             if (micBtn) micBtn.disabled = true;
+          } else if (gameStatus === 'last_words') {
+            if (micBtn) micBtn.disabled = (window.__lastRoomState && window.__lastRoomState.lastWordPlayerId !== myId);
           } else {
             if (micBtn) micBtn.disabled = true;
           }
@@ -365,11 +367,11 @@
   window.myNightTargetId = null;
   nightActionSubmitted = false;
 
-  appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes }) => {
+  appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes, lastWordPlayerId }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
     const chatContainer = document.querySelector('.chat-container'); if (chatContainer) { if (hasChat === false) chatContainer.classList.add('hidden'); else chatContainer.classList.remove('hidden'); }
     // keep last room state for helpers
-    window.__lastRoomState = { users, seats, gameStatus, votes };
+    window.__lastRoomState = { users, seats, gameStatus, votes, lastWordPlayerId };
     renderSeats(maxSeats, users, seats, currentSpeakerId, gameStatus);
     updateUI(users, seats, gameStatus);
 
@@ -463,6 +465,15 @@
   appEvents.on('timer-tick', ({ timeLeft }) => { const timerEl = document.getElementById('game-timer-text'); if (!timerEl) return; if (timerEl.innerText.includes('Обсуждение')) timerEl.innerText = `💬 Общее обсуждение. Осталось: ${timeLeft}с`; else timerEl.innerText = `⏱ Осталось времени: ${timeLeft}с`; });
 
   appEvents.on('discussion-started', ({ timeLeft }) => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerHTML = "💬 <span style='color: #00bcd4;'>ФАЗА ОБЩЕГО ОБСУЖДЕНИЯ! Микрофоны доступны.</span>"; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `💬 Общее обсуждение. Осталось: ${timeLeft}с`; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && !window.lkRoom.localParticipant.isMicrophoneEnabled) { window.lkRoom.localParticipant.setMicrophoneEnabled(true).then(() => { updateMicButtonUI(true); appSocket.toggleMedia(true); }).catch(e => console.error(e)); } });
+
+  appEvents.on('last-word-started', ({ playerId, playerName, timeLeft }) => {
+    const isSpeaker = window.appSocket.socket.id === playerId;
+    const statusEl = document.getElementById('game-status-text');
+    const timerEl = document.getElementById('game-timer-text');
+    if (statusEl) statusEl.innerText = isSpeaker ? '🗣️ Ваше последнее слово.' : `🗣️ Последнее слово игрока «${playerName}».`;
+    if (timerEl) timerEl.innerText = `Последнее слово. Осталось: ${timeLeft}с`;
+    if (micBtn) micBtn.disabled = !isSpeaker;
+  });
 
   // Ночь — выключаем микрофоны у всех
   appEvents.on('night-started', ({ timeLeft }) => {
