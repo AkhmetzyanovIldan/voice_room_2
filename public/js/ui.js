@@ -7,7 +7,6 @@
     console.error('appEvents or appSocket not initialized');
     return;
   }
-
   // DOM helpers
   const $ = (sel) => document.querySelector(sel);
 
@@ -34,6 +33,56 @@
   let myId = null;
   let mySeat = null;
   let isAudioOn = true;
+  let nightActionSubmitted = false;
+
+  function getTelegramProfile() {
+    const user = window.Telegram && window.Telegram.WebApp &&
+      window.Telegram.WebApp.initDataUnsafe &&
+      window.Telegram.WebApp.initDataUnsafe.user;
+    if (!user) return { username: '', photoUrl: '' };
+    const name = [user.first_name, user.last_name].filter(Boolean).join(' ');
+    return { username: name || user.username || '', photoUrl: user.photo_url || '' };
+  }
+
+  function getCurrentProfile() {
+    const telegramProfile = getTelegramProfile();
+    return {
+      username: usernameInput && usernameInput.value.trim() || telegramProfile.username || 'Игрок',
+      photoUrl: telegramProfile.photoUrl
+    };
+  }
+
+  function getUserNameById(userId) {
+    const users = window.__lastRoomState && window.__lastRoomState.users;
+    return users && users[userId] ? users[userId].username : 'игрока';
+  }
+
+  function getEnabledRoles() {
+    return Array.from(document.querySelectorAll('input[name="enabled-role"]:checked'))
+      .map((input) => input.value);
+  }
+
+  function renderRoleOptions() {
+    const roles = window.mafiaRoles || [];
+    const groups = {
+      mafia: document.getElementById('mafia-roles'),
+      peaceful: document.getElementById('peaceful-roles')
+    };
+    roles.forEach((role) => {
+      const group = groups[role.clan];
+      if (!group) return;
+      const label = document.createElement('label');
+      label.innerHTML = `<input type="checkbox" name="enabled-role" value="${role.id}"${role.enabledByDefault ? ' checked' : ''}> ${role.name}`;
+      group.appendChild(label);
+    });
+  }
+
+  renderRoleOptions();
+
+  const telegramProfile = getTelegramProfile();
+  if (usernameInput && !usernameInput.value.trim() && telegramProfile.username) {
+    usernameInput.value = telegramProfile.username;
+  }
 
   // Helpers from former app.js
   function showError(msg) { const el = document.getElementById('error-box'); if (el) el.innerText = msg || ''; }
@@ -43,14 +92,18 @@
     if (!container) return;
     container.querySelectorAll('.seat').forEach(el => el.remove());
 
-    const radius = 95;
-    const centerX = 130;
-    const centerY = 130;
+    const totalSeats = maxSeats % 2 === 0 ? maxSeats : maxSeats + 1;
+    const rows = totalSeats / 2;
+    const seatSize = 40;
+    const rowGap = 8;
+    const layoutHeight = rows * seatSize + (rows - 1) * rowGap;
+    const startY = Math.max(0, (container.clientHeight - layoutHeight) / 2);
 
-    for (let i = 0; i < maxSeats; i++) {
-      const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-      const x = centerX + radius * Math.cos(angle) - 20;
-      const y = centerY + radius * Math.sin(angle) - 20;
+    for (let i = 0; i < totalSeats; i++) {
+      const row = Math.floor(i / 2);
+      const side = i % 2;
+      const x = side === 0 ? 10 : container.clientWidth - seatSize - 10;
+      const y = startY + row * (seatSize + rowGap);
 
       const seatEl = document.createElement('div');
       seatEl.className = 'seat';
@@ -58,11 +111,22 @@
       seatEl.style.left = `${x}px`;
       seatEl.style.top = `${y}px`;
 
-      const userIdInSeat = seatsData[i];
+      const isBlockedSeat = i >= maxSeats;
+      const userIdInSeat = isBlockedSeat ? null : seatsData[i];
+      if (isBlockedSeat) {
+        seatEl.classList.add('blocked-seat');
+        seatEl.innerText = '✕';
+        seatEl.title = 'Место недоступно';
+        seatEl.onclick = () => {};
+        container.appendChild(seatEl);
+        continue;
+      }
+
       if (userIdInSeat) {
         const user = users[userIdInSeat];
         seatEl.classList.add('occupied');
 
+        if (userIdInSeat === myId) seatEl.classList.add('my-seat');
         if (userIdInSeat === currentSpeakerId) seatEl.classList.add('active-speaker');
 
         if (user && user.photoUrl) {
@@ -78,7 +142,14 @@
         // If it's night and current user can act and is alive, clicking a seat is a night action
         const me = users && users[myId];
         const myRole = window.myRole; // private role stored from personal 'game-started' event
-        if (gameStatus === 'night' && me && me.isAlive && myRole && ['mafia','doctor','cop'].includes(myRole)) {
+        if (gameStatus === 'day_voting' && me && me.isAlive) {
+          seatEl.style.cursor = 'pointer';
+          seatEl.onclick = () => {
+            if (userIdInSeat !== myId && user && user.isAlive !== false) {
+              appSocket.dayVote(userIdInSeat);
+            }
+          };
+        } else if (gameStatus === 'night' && me && me.isAlive && myRole && ['mafia','doctor','cop'].includes(myRole)) {
           // clicking targets another player
           seatEl.style.cursor = 'pointer';
           seatEl.onclick = () => {
@@ -86,7 +157,15 @@
             const actionType = myRole === 'mafia' ? 'mafia_kill' : myRole === 'doctor' ? 'doctor_heal' : myRole === 'cop' ? 'cop_check' : null;
             if (!actionType) return;
             if (!currentRoomId) { console.warn('no currentRoomId'); return; }
-            console.log('emitting night-action', { roomId: currentRoomId, targetId: userIdInSeat, actionType, myRole });
+            if (nightActionSubmitted) return;
+            const actionNames = {
+              mafia_kill: 'стрелять в',
+              doctor_heal: 'вылечить',
+              cop_check: 'проверить'
+            };
+            const targetName = user ? user.username : 'этого игрока';
+            if (!window.confirm(`${actionNames[actionType]} игрока «${targetName}»?`)) return;
+            nightActionSubmitted = true;
             window.appSocket.socket.emit('night-action', { roomId: currentRoomId, targetId: userIdInSeat, actionType });
           };
         } else {
@@ -209,12 +288,14 @@
 
   window.confirmCreateRoom = function () {
     const roomName = document.getElementById('room-name-input') && document.getElementById('room-name-input').value.trim();
-    const username = document.getElementById('username-input') && document.getElementById('username-input').value.trim() || 'Игрок';
-    const photoUrl = '';
+    const profile = getCurrentProfile();
+    const username = profile.username;
+    const photoUrl = profile.photoUrl;
     const maxSeats = document.getElementById('input-max-seats') && document.getElementById('input-max-seats').value;
     const hasChat = document.getElementById('input-has-chat') && document.getElementById('input-has-chat').checked;
+    const enabledRoles = getEnabledRoles();
     const overlay = document.getElementById('modal-overlay'); if (overlay) overlay.classList.add('hidden');
-    appSocket.createRoom({ roomName, username, photoUrl, maxSeats, hasChat });
+    appSocket.createRoom({ roomName, username, photoUrl, maxSeats, hasChat, enabledRoles });
   };
 
   // make UI actions available globally too
@@ -226,7 +307,12 @@
   window.leaveRoom = leaveRoom;
 
   // attach UI controls
-  if (joinBtn) joinBtn.onclick = () => { const roomId = roomCodeInput.value.trim(); const username = usernameInput.value.trim() || 'Игрок'; if (!roomId) return showError('Введите код комнаты'); const photoUrl = ''; appSocket.joinRoom(roomId, username, photoUrl); };
+  if (joinBtn) joinBtn.onclick = () => {
+    const roomId = roomCodeInput.value.trim();
+    const profile = getCurrentProfile();
+    if (!roomId) return showError('Введите код комнаты');
+    appSocket.joinRoom(roomId, profile.username, profile.photoUrl);
+  };
   if (chatSendBtn) chatSendBtn.onclick = sendChatMessage;
   if (readyBtn) readyBtn.onclick = toggleReady;
   if (micBtn) micBtn.onclick = toggleMic;
@@ -245,7 +331,7 @@
     if (roomCodeDisplay) roomCodeDisplay.innerText = roomId;
 
     // request livekit token
-    const username = usernameInput && usernameInput.value.trim() || 'Игрок';
+    const username = getCurrentProfile().username;
     appSocket.getLivekitToken(username, roomId);
   });
 
@@ -277,12 +363,13 @@
 
   // track my selected night target locally
   window.myNightTargetId = null;
+  nightActionSubmitted = false;
 
-  appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId }) => {
+  appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
     const chatContainer = document.querySelector('.chat-container'); if (chatContainer) { if (hasChat === false) chatContainer.classList.add('hidden'); else chatContainer.classList.remove('hidden'); }
     // keep last room state for helpers
-    window.__lastRoomState = { users, seats, gameStatus };
+    window.__lastRoomState = { users, seats, gameStatus, votes };
     renderSeats(maxSeats, users, seats, currentSpeakerId, gameStatus);
     updateUI(users, seats, gameStatus);
 
@@ -297,6 +384,26 @@
       }
     }
   } catch (e) { /* ignore errors */ }
+  });
+
+  appEvents.on('voting-started', ({ timeLeft }) => {
+    const statusEl = document.getElementById('game-status-text');
+    if (statusEl) statusEl.innerText = '🗳️ Голосование. Выберите игрока за столом.';
+    const timerEl = document.getElementById('game-timer-text');
+    if (timerEl) timerEl.innerText = `Голосование. Осталось: ${timeLeft}с`;
+    if (micBtn) micBtn.disabled = true;
+  });
+
+  appEvents.on('day-vote-result', ({ eliminatedPlayerName, tie, winner }) => {
+    const statusEl = document.getElementById('game-status-text');
+    if (!statusEl) return;
+    if (winner) {
+      statusEl.innerText = winner === 'mafia' ? '🏁 Победил клан мафии.' : '🏁 Победил клан мирных.';
+    } else if (tie || !eliminatedPlayerName) {
+      statusEl.innerText = '⚖️ Голоса разделились. Никто не покинул игру.';
+    } else {
+      statusEl.innerText = `⚖️ Игрок ${eliminatedPlayerName} исключён.`;
+    }
   });
 
   // acknowledge of night action from server (private)
@@ -314,9 +421,13 @@
             const m = document.createElement('div'); m.className = 'target-marker'; m.style.position='absolute'; m.style.bottom='-6px'; m.style.left='50%'; m.style.transform='translateX(-50%)'; m.style.fontSize='10px'; m.innerText = '🎯 ВЫ'; targetEl.appendChild(m);
           }
         }
+        const targetName = getUserNameById(targetId);
+        if (actionType === 'mafia_kill') alert(`Вы стреляли в игрока «${targetName}».`);
+        if (actionType === 'doctor_heal') alert(`Вы лечили игрока «${targetName}».`);
       }
     } else {
-      alert('Действие не принято (возможно вы не имеете права или фаза не та)');
+      nightActionSubmitted = false;
+      alert('Действие не принято: этой ночью вы уже действовали или действие недоступно.');
     }
   });
 
@@ -367,9 +478,11 @@
   });
 
   // Результаты ночи
-  appEvents.on('night-result', ({ killedPlayerName }) => {
+  appEvents.on('night-result', ({ killedPlayerName, winner }) => {
     const statusEl = document.getElementById('game-status-text');
-    if (killedPlayerName) {
+    if (winner) {
+      if (statusEl) statusEl.innerText = winner === 'mafia' ? '🏁 Победил клан мафии.' : '🏁 Победил клан мирных.';
+    } else if (killedPlayerName) {
       alert(`Этой ночью был убит: ${killedPlayerName}`);
       if (statusEl) statusEl.innerText = `🔪 Ночь завершена. Погиб: ${killedPlayerName}`;
     } else {
@@ -379,8 +492,8 @@
   });
 
   // Результат проверки комиссара (личное сообщение)
-  appEvents.on('cop-result', ({ isMafia }) => {
-    alert(isMafia ? 'Проверенный игрок является МАФИЕЙ' : 'Проверенный игрок НЕ мафия');
+  appEvents.on('cop-result', ({ targetName, isMafia }) => {
+    alert(`Игрок «${targetName || ''}» из клана ${isMafia ? 'мафии' : 'мирных'}.`);
   });
 
   appEvents.on('game-ended', () => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '🏁 Игра окончена. Можете общаться или начать новую.'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = 'Игра завершена'; if (mySeat !== null && readyBtn) { readyBtn.style.display = 'inline-block'; readyBtn.innerText = 'Готов к игре'; readyBtn.classList.remove('ready-on'); }

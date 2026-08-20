@@ -24,6 +24,16 @@
                 <input type="checkbox" id="input-has-chat" checked style="width: 18px; height: 18px; accent-color: #bb86fc;">
                 <label for="input-has-chat">Включить чат в комнате</label>
             </div>
+            <div class="roles-settings">
+                <div class="roles-column">
+                    <h3>Клан мафии</h3>
+                    <div id="mafia-roles"></div>
+                </div>
+                <div class="roles-column">
+                    <h3>Клан мирных</h3>
+                    <div id="peaceful-roles"></div>
+                </div>
+            </div>
             <button onclick="confirmCreateRoom()">Создать</button>
             <button class="btn-secondary" onclick="document.getElementById('modal-overlay').classList.add('hidden')">Отмена</button>
         </div>
@@ -59,7 +69,6 @@
         <div class="game-status-panel">
             <div id="game-status-text">Статус: Ожидание игроков...</div>
             <div id="game-timer-text">--</div>
-            <button id="ready-btn-game" onclick="toggleReady()">Готов к игре</button>
         </div>
 
         <!-- Выпадающая панель списка слушателей -->
@@ -76,6 +85,15 @@
                     <span id="users-count">0 участников</span>
                 </div>
             </div>
+            <button id="ready-btn-game" onclick="toggleReady()">Готов к игре</button>
+
+            <div class="controls">
+                <button class="ctrl-btn" id="mic-btn" onclick="toggleMic()" disabled>🎤 Мик</button>
+                <button class="ctrl-btn active" id="audio-btn" onclick="toggleAudio()">🔊 Звук</button>
+                <button class="ctrl-btn" id="seat-action-btn" onclick="handleSeatAction()">🪑 Сесть</button>
+                <button class="ctrl-btn" id="listeners-toggle-btn" onclick="toggleListenersPanel()">👥 Слушатели</button>
+                <button class="ctrl-btn danger" onclick="leaveRoom()">🚪 Выйти</button>
+            </div>
 
             <div class="chat-container">
                 <div class="chat-messages" id="chat-messages"></div>
@@ -85,19 +103,12 @@
                 </div>
             </div>
         </div>
-
-        <div class="controls">
-            <button class="ctrl-btn" id="mic-btn" onclick="toggleMic()" disabled>🎤 Мик</button>
-            <button class="ctrl-btn active" id="audio-btn" onclick="toggleAudio()">🔊 Звук</button>
-            <button class="ctrl-btn" id="seat-action-btn" onclick="handleSeatAction()">🪑 Сесть</button>
-            <button class="ctrl-btn" id="listeners-toggle-btn" onclick="toggleListenersPanel()">👥 Слушатели</button>
-            <button class="ctrl-btn danger" onclick="leaveRoom()">🚪 Выйти</button>
-        </div>
     </div>
 
     <script src="/js/livekit.js"></script>
     <script src="/js/socket.js"></script>
     <script src="/js/ui-helpers.js"></script>
+    <script src="/js/roles.js"></script>
     <script src="/js/ui.js"></script>
 </body>
 </html>

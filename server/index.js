@@ -5,6 +5,7 @@ const path = require('path');
 const { AccessToken } = require('livekit-server-sdk');
 
 const config = require('./config');
+const { normalizeEnabledRoles, getVotePower, getClan } = require('./roles');
 
 const app = express();
 const server = http.createServer(app);
@@ -32,7 +33,7 @@ io.on('connection', (socket) => {
     socket.emit('livekit-token', { token, url: config.LIVEKIT_URL });
   });
 
-  socket.on('create-room', ({ roomName, username, photoUrl, maxSeats, hasChat }) => {
+  socket.on('create-room', ({ roomName, username, photoUrl, maxSeats, hasChat, enabledRoles }) => {
     let roomId = generateRoomCode();
     while (rooms[roomId]) { roomId = generateRoomCode(); }
 
@@ -44,6 +45,7 @@ io.on('connection', (socket) => {
       name: roomName || 'Комната',
       maxSeats: max,
       hasChat: hasChat !== undefined ? hasChat : true,
+      enabledRoles: normalizeEnabledRoles(enabledRoles),
       users: {},
       seats: seats,
       gameStatus: 'waiting',
@@ -52,6 +54,9 @@ io.on('connection', (socket) => {
       timer: null,
       // Mafia game state (initialized for game usage)
       nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null }
+      ,
+      votes: {},
+      nightActionActors: {}
     };
 
     joinRoomLogic(socket, roomId, username, photoUrl);
@@ -176,6 +181,10 @@ io.on('connection', (socket) => {
     // actionType может быть: 'mafia_kill', 'doctor_heal', 'cop_check'
     // Проверяем, что отправитель имеет право совершать действие этой роли
     let accepted = false;
+    if (room.nightActionActors[socket.id]) {
+      socket.emit('night-action-ack', { actionType, targetId, accepted: false, reason: 'already-acted' });
+      return;
+    }
     if (actionType === 'mafia_kill') {
       if (actor.role === 'mafia') { room.nightActions.mafiaTarget = targetId; accepted = true; }
     }
@@ -185,15 +194,34 @@ io.on('connection', (socket) => {
     if (actionType === 'cop_check') {
       if (actor.role === 'cop') {
         room.nightActions.copTarget = targetId;
-        socket.emit('cop-result', { isMafia: !!(target && target.role === 'mafia') });
         accepted = true;
       }
     }
 
+    if (accepted) {
+      room.nightActionActors[socket.id] = true;
+      if (actionType === 'cop_check') {
+        socket.emit('cop-result', { targetName: target.username, isMafia: target.role === 'mafia' });
+      }
+    }
     console.log(`night-action from ${socket.id} (${actor && actor.role}) action=${actionType} target=${targetId} accepted=${accepted}`);
 
     // send ack only to the actor (private)
     socket.emit('night-action-ack', { actionType, targetId, accepted });
+  });
+
+  socket.on('day-vote', ({ targetId }) => {
+    const roomId = socket.data.roomId;
+    const room = rooms[roomId];
+    const voter = room && room.users[socket.id];
+    const target = room && room.users[targetId];
+    if (!room || room.gameStatus !== 'day_voting' || !voter || !voter.isAlive || voter.seat === null ||
+        !target || !target.isAlive || target.seat === null) return;
+    room.votes[socket.id] = targetId;
+    socket.emit('day-vote-ack', { targetId });
+    emitRoomUpdate(roomId);
+    const alive = Object.values(room.users).filter(u => u.seat !== null && u.isAlive);
+    if (alive.every(u => room.votes[u.id])) resolveDayVote(roomId);
   });
 
   socket.on('send-chat-message', (text) => {
@@ -248,9 +276,11 @@ function emitRoomUpdate(roomId) {
     roomName: room.name,
     maxSeats: room.maxSeats,
     hasChat: room.hasChat,
+    enabledRoles: room.enabledRoles,
     users: publicUsers,
     seats: room.seats,
     gameStatus: room.gameStatus,
+    votes: Object.keys(room.votes || {}),
     currentSpeakerId: currentSpeakerId
   });
 }
@@ -314,6 +344,7 @@ function startGame(roomId) {
 
   // reset night actions
   room.nightActions = { mafiaTarget: null, doctorTarget: null, copTarget: null };
+  room.votes = {};
 
   // assign roles
   assignRoles(seated);
@@ -325,6 +356,7 @@ function startGame(roomId) {
 
   // update room status and clients
   room.gameStatus = 'night';
+  room.nightActionActors = {};
   // broadcast to room that the game started (clients may also receive personal role via private event)
   io.to(roomId).emit('game-started', { roomStatus: room.gameStatus });
   emitRoomUpdate(roomId);
@@ -337,6 +369,7 @@ function startNightPhase(roomId) {
   const room = rooms[roomId];
   if (!room) return;
   room.gameStatus = 'night';
+  room.nightActionActors = {};
   let timeLeft = 30;
 
   console.log(`startNightPhase ${roomId}: starting night for ${Object.keys(room.users).length} users`);
@@ -373,11 +406,13 @@ function resolveNight(roomId) {
     }
   }
 
-  io.to(roomId).emit('night-result', { killedPlayerName });
+  const winner = checkVictory(room);
+  io.to(roomId).emit('night-result', { killedPlayerName, winner });
 
   // short pause to show result, then go to day speeches
   setTimeout(() => {
-    startDaySpeechesPhase(roomId);
+    if (winner) endGame(roomId, winner);
+    else startDaySpeechesPhase(roomId);
   }, 5000);
 }
 
@@ -438,15 +473,74 @@ function startGeneralDiscussion(roomId) {
       io.to(roomId).emit('timer-tick', { timeLeft: 0 });
       clearInterval(room.timer);
       room.timer = null;
-      endGame(roomId);
+      startDayVoting(roomId);
     }
   }, 1000);
+}
+
+function startDayVoting(roomId) {
+  const room = rooms[roomId];
+  if (!room) return;
+  room.gameStatus = 'day_voting';
+  room.votes = {};
+  room.nightActionActors = {};
+  let timeLeft = 30;
+  io.to(roomId).emit('voting-started', { timeLeft });
+  emitRoomUpdate(roomId);
+  clearInterval(room.timer);
+  room.timer = setInterval(() => {
+    timeLeft--;
+    io.to(roomId).emit('timer-tick', { timeLeft: Math.max(timeLeft, 0) });
+    if (timeLeft <= 0) {
+      clearInterval(room.timer);
+      room.timer = null;
+      resolveDayVote(roomId);
+    }
+  }, 1000);
+}
+
+function checkVictory(room) {
+  const alive = Object.values(room.users).filter(u => u.seat !== null && u.isAlive);
+  const mafiaPower = alive
+    .filter(u => getClan(u.role) === 'mafia')
+    .reduce((sum, u) => sum + getVotePower(u.role), 0);
+  const peacefulPower = alive
+    .filter(u => getClan(u.role) !== 'mafia')
+    .reduce((sum, u) => sum + getVotePower(u.role), 0);
+  if (mafiaPower === 0) return 'peaceful';
+  if (mafiaPower >= peacefulPower) return 'mafia';
+  return null;
+}
+
+function resolveDayVote(roomId) {
+  const room = rooms[roomId];
+  if (!room || room.gameStatus !== 'day_voting') return;
+  clearInterval(room.timer);
+  room.timer = null;
+  const counts = {};
+  Object.entries(room.votes).forEach(([voterId, targetId]) => {
+    const voter = room.users[voterId];
+    const target = room.users[targetId];
+    if (voter && voter.isAlive && target && target.isAlive) counts[targetId] = (counts[targetId] || 0) + 1;
+  });
+  const maxVotes = Math.max(0, ...Object.values(counts));
+  const leaders = Object.keys(counts).filter(id => counts[id] === maxVotes);
+  const eliminated = leaders.length === 1 ? room.users[leaders[0]] : null;
+  if (eliminated) eliminated.isAlive = false;
+  const winner = checkVictory(room);
+  io.to(roomId).emit('day-vote-result', {
+    eliminatedPlayerName: eliminated ? eliminated.username : null,
+    tie: leaders.length > 1,
+    winner
+  });
+  if (winner) setTimeout(() => endGame(roomId, winner), 3000);
+  else setTimeout(() => startNightPhase(roomId), 3000);
 }
 
 // keep startDiscussionPhase as a compatibility wrapper
 function startDiscussionPhase(roomId) { startGeneralDiscussion(roomId); }
 
-function endGame(roomId) {
+function endGame(roomId, winner = null) {
   const room = rooms[roomId];
   if (!room) return;
   console.log(`endGame ${roomId}: resetting game state`);
@@ -459,10 +553,12 @@ function endGame(roomId) {
   });
   // clear game internals
   room.nightActions = { mafiaTarget: null, doctorTarget: null, copTarget: null };
+  room.votes = {};
+  room.nightActionActors = {};
   room.turnOrder = [];
   room.currentTurnIndex = 0;
 
-  io.to(roomId).emit('game-ended');
+  io.to(roomId).emit('game-ended', { winner });
   emitRoomUpdate(roomId);
 }
 

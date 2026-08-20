@@ -35,12 +35,17 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
       }
     });
 
-    socket.on('create-room', ({ roomName, username, photoUrl, maxSeats, hasChat }: any) => {
+    socket.on('create-room', ({ roomName, username, photoUrl, maxSeats, hasChat, enabledRoles }: any) => {
       let roomId = generateRoomCode();
       while (hasRoom(roomId)) { roomId = generateRoomCode(); }
 
       const max = parseInt(maxSeats) || 6;
-      const room = createRoom(roomId, { name: roomName || 'Комната', maxSeats: max, hasChat: hasChat !== undefined ? hasChat : true });
+      const room = createRoom(roomId, {
+        name: roomName || 'Комната',
+        maxSeats: max,
+        hasChat: hasChat !== undefined ? hasChat : true,
+        enabledRoles: Array.isArray(enabledRoles) ? enabledRoles : ['mafia', 'cop', 'doctor']
+      });
 
       joinRoomLogic(socket, roomId, username, photoUrl);
     });
@@ -158,6 +163,10 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
       if (!target) return;
 
       let accepted = false;
+      if (room.nightActionActors[socket.id]) {
+        socket.emit('night-action-ack', { actionType, targetId, accepted: false, reason: 'already-acted' });
+        return;
+      }
       if (actionType === 'mafia_kill') {
         if (actor.role === 'mafia') { room.nightActions.mafiaTarget = targetId; accepted = true; }
       }
@@ -167,13 +176,22 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
       if (actionType === 'cop_check') {
         if (actor.role === 'cop') {
           room.nightActions.copTarget = targetId;
-          socket.emit('cop-result', { isMafia: !!(target && target.role === 'mafia') });
           accepted = true;
         }
       }
 
+      if (accepted) {
+        room.nightActionActors[socket.id] = true;
+        if (actionType === 'cop_check') {
+          socket.emit('cop-result', { targetName: target.username, isMafia: target.role === 'mafia' });
+        }
+      }
       console.log(`night-action from ${socket.id} (${actor && actor.role}) action=${actionType} target=${targetId} accepted=${accepted}`);
       socket.emit('night-action-ack', { actionType, targetId, accepted });
+    });
+
+    socket.on('day-vote', ({ targetId }: any) => {
+      gameEngine.submitDayVote(socket.id, targetId);
     });
 
     socket.on('send-chat-message', (text: string) => {

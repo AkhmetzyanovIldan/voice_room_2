@@ -1,5 +1,5 @@
 export type Role = 'mafia' | 'cop' | 'doctor' | 'civilian' | string;
-export type GameStatus = 'waiting' | 'night' | 'day_speeches' | 'day_discussion';
+export type GameStatus = 'waiting' | 'night' | 'day_speeches' | 'day_discussion' | 'day_voting';
 
 export interface NightActions {
   mafiaTarget: string | null;
@@ -24,6 +24,9 @@ export interface Room {
   name: string;
   maxSeats: number;
   hasChat: boolean;
+  enabledRoles: string[];
+  votes: Record<string, string>;
+  nightActionActors: Record<string, boolean>;
   users: Record<string, Player>;
   // seats as array indexed by seat number (0..maxSeats-1)
   seats: (string | null)[];

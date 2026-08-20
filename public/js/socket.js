@@ -32,6 +32,7 @@
   function setReady() { socket.emit('set-ready'); }
   function toggleMedia(mic) { socket.emit('toggle-media', { mic }); }
   function sendChatMessage(text) { socket.emit('send-chat-message', text); }
+  function dayVote(targetId) { socket.emit('day-vote', { targetId }); }
 
   socket.on('connect', () => emitter.emit('connect'));
   socket.on('disconnect', () => emitter.emit('disconnect'));
@@ -50,6 +51,8 @@
   socket.on('night-started', (d) => emitter.emit('night-started', d));
   socket.on('night-result', (d) => emitter.emit('night-result', d));
   socket.on('cop-result', (d) => emitter.emit('cop-result', d));
+  socket.on('voting-started', (d) => emitter.emit('voting-started', d));
+  socket.on('day-vote-result', (d) => emitter.emit('day-vote-result', d));
 
   // expose API
   window.appSocket = {
@@ -62,5 +65,6 @@
     setReady,
     toggleMedia,
     sendChatMessage,
+    dayVote,
   };
 })();
