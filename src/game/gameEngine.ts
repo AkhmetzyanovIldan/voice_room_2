@@ -102,6 +102,7 @@ export function createGameEngine(io: Server) {
     const room = getRoom(roomId) as Room | undefined;
     if (!room) return;
     room.gameStatus = 'night';
+    room.nightActions = { mafiaTarget: null, doctorTarget: null, copTarget: null };
     room.nightActionActors = {};
     let timeLeft = 30;
     console.log(`startNightPhase ${roomId}: starting night for ${Object.keys(room.users).length} users`);

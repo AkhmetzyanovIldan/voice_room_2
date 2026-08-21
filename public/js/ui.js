@@ -13,9 +13,14 @@
   const lobby = $('#lobby');
   const roomSection = $('#room');
   const joinBtn = $('#join-btn');
-  const roomCodeInput = $('#room-code-input');
-  const usernameInput = $('#username-input');
   const createBtn = $('#create-room-btn');
+  const joinRoomBtn = $('#join-room-btn');
+  const modalOverlay = $('#modal-overlay');
+  const createRoomModal = $('#create-room-modal');
+  const joinRoomModal = $('#join-room-modal');
+  const createUsernameInput = $('#create-username-input');
+  const joinUsernameInput = $('#join-username-input');
+  const joinRoomCodeInput = $('#join-room-code-input');
 
   const roomTitleDisplay = $('#room-title-display');
   const roomCodeDisplay = $('#room-code-display');
@@ -46,10 +51,21 @@
 
   function getCurrentProfile() {
     const telegramProfile = getTelegramProfile();
+    const preferredName = (createUsernameInput && createUsernameInput.value.trim()) ||
+      (joinUsernameInput && joinUsernameInput.value.trim()) ||
+      telegramProfile.username ||
+      'Игрок';
     return {
-      username: usernameInput && usernameInput.value.trim() || telegramProfile.username || 'Игрок',
+      username: preferredName,
       photoUrl: telegramProfile.photoUrl
     };
+  }
+
+  function syncProfileInputs() {
+    const telegramProfile = getTelegramProfile();
+    const defaultName = telegramProfile.username || 'Игрок';
+    if (createUsernameInput && !createUsernameInput.value.trim()) createUsernameInput.value = defaultName;
+    if (joinUsernameInput && !joinUsernameInput.value.trim()) joinUsernameInput.value = defaultName;
   }
 
   function getUserNameById(userId) {
@@ -79,10 +95,7 @@
 
   renderRoleOptions();
 
-  const telegramProfile = getTelegramProfile();
-  if (usernameInput && !usernameInput.value.trim() && telegramProfile.username) {
-    usernameInput.value = telegramProfile.username;
-  }
+  syncProfileInputs();
 
   // Helpers from former app.js
   function showError(msg) { const el = document.getElementById('error-box'); if (el) el.innerText = msg || ''; }
@@ -280,24 +293,58 @@
 
   function leaveRoom() { if (window.lkRoom) { window.lkRoom.disconnect(); window.lkRoom = null; } window.location.reload(); }
 
-  // Expose some functions globally to support inline onclick attributes in index.html
-  window.openSettingsModal = function () {
-    const roomName = document.getElementById('room-name-input') && document.getElementById('room-name-input').value.trim();
-    if (!roomName) { showError('Введите название комнаты'); return; }
+  function openModal(modal) {
     showError('');
-    const overlay = document.getElementById('modal-overlay'); if (overlay) overlay.classList.remove('hidden');
+    if (modalOverlay) modalOverlay.classList.remove('hidden');
+    if (createRoomModal) createRoomModal.classList.toggle('hidden', modal !== createRoomModal);
+    if (joinRoomModal) joinRoomModal.classList.toggle('hidden', modal !== joinRoomModal);
+    syncProfileInputs();
+  }
+
+  function closeModal() {
+    if (modalOverlay) modalOverlay.classList.add('hidden');
+    if (createRoomModal) createRoomModal.classList.add('hidden');
+    if (joinRoomModal) joinRoomModal.classList.add('hidden');
+  }
+
+  window.openSettingsModal = function () {
+    openModal(createRoomModal);
   };
 
+  window.openJoinRoomModal = function () {
+    openModal(joinRoomModal);
+  };
+
+  window.closeModal = closeModal;
+
   window.confirmCreateRoom = function () {
-    const roomName = document.getElementById('room-name-input') && document.getElementById('room-name-input').value.trim();
     const profile = getCurrentProfile();
-    const username = profile.username;
+    const username = profile.username.trim();
     const photoUrl = profile.photoUrl;
     const maxSeats = document.getElementById('input-max-seats') && document.getElementById('input-max-seats').value;
     const hasChat = document.getElementById('input-has-chat') && document.getElementById('input-has-chat').checked;
     const enabledRoles = getEnabledRoles();
-    const overlay = document.getElementById('modal-overlay'); if (overlay) overlay.classList.add('hidden');
-    appSocket.createRoom({ roomName, username, photoUrl, maxSeats, hasChat, enabledRoles });
+    if (!username) {
+      showError('Введите ваше имя');
+      return;
+    }
+    closeModal();
+    appSocket.createRoom({ roomName: 'Комната', username, photoUrl, maxSeats, hasChat, enabledRoles });
+  };
+
+  window.confirmJoinRoom = function () {
+    const roomId = (joinRoomCodeInput && joinRoomCodeInput.value.trim()) || '';
+    const username = (joinUsernameInput && joinUsernameInput.value.trim()) || getCurrentProfile().username;
+    if (!roomId) {
+      showError('Введите код комнаты');
+      return;
+    }
+    if (!username) {
+      showError('Введите ваше имя');
+      return;
+    }
+    closeModal();
+    appSocket.joinRoom(roomId, username, getCurrentProfile().photoUrl);
   };
 
   // make UI actions available globally too
@@ -309,12 +356,9 @@
   window.leaveRoom = leaveRoom;
 
   // attach UI controls
-  if (joinBtn) joinBtn.onclick = () => {
-    const roomId = roomCodeInput.value.trim();
-    const profile = getCurrentProfile();
-    if (!roomId) return showError('Введите код комнаты');
-    appSocket.joinRoom(roomId, profile.username, profile.photoUrl);
-  };
+  if (createBtn) createBtn.onclick = () => openModal(createRoomModal);
+  if (joinRoomBtn) joinRoomBtn.onclick = () => openModal(joinRoomModal);
+  if (joinBtn) joinBtn.onclick = () => window.confirmJoinRoom();
   if (chatSendBtn) chatSendBtn.onclick = sendChatMessage;
   if (readyBtn) readyBtn.onclick = toggleReady;
   if (micBtn) micBtn.onclick = toggleMic;
@@ -326,7 +370,7 @@
   appEvents.on('room-joined', ({ roomId, roomName }) => {
     currentRoomId = roomId;
     myId = window.appSocket.socket.id;
-    if (document.getElementById('modal-overlay')) document.getElementById('modal-overlay').classList.add('hidden');
+    closeModal();
     if (lobby) lobby.classList.add('hidden');
     if (roomSection) roomSection.classList.remove('hidden');
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;

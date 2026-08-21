@@ -81,6 +81,17 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
       gameEngine.emitRoomUpdate(roomId);
     }
 
+    function canSpeakInCurrentPhase(room: Room, socketId: string, user: Player) {
+      if (room.gameStatus === 'waiting') return true;
+      if (room.gameStatus === 'last_words') return room.lastWordPlayerId === socketId;
+      if (room.gameStatus === 'day_speeches') {
+        const activePlayer = room.turnOrder && room.turnOrder[room.currentTurnIndex];
+        return !!activePlayer && activePlayer.id === socketId && user.isAlive;
+      }
+      if (room.gameStatus === 'day_discussion') return user.isAlive;
+      return false;
+    }
+
     socket.on('take-seat', (seatIndex: number) => {
       const roomId = socket.data.roomId;
       if (!roomId || !hasRoom(roomId)) return;
@@ -138,17 +149,7 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
       const user = room.users[socket.id];
       if (!user || user.seat === null) return;
 
-      if (room.gameStatus === 'last_words') {
-        if (room.lastWordPlayerId !== socket.id) return;
-      } else if (room.gameStatus === 'day_speeches') {
-        const activePlayer = room.turnOrder && room.turnOrder[room.currentTurnIndex];
-        if (!activePlayer) return;
-        if (activePlayer.id !== socket.id) return;
-      } else if (room.gameStatus === 'day_discussion' || room.gameStatus === 'waiting') {
-        // allowed
-      } else {
-        return;
-      }
+      if (!canSpeakInCurrentPhase(room, socket.id, user)) return;
 
       user.mic = mic;
       gameEngine.emitRoomUpdate(roomId);
@@ -199,6 +200,26 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
     socket.on('send-chat-message', (text: string) => {
       const roomId = socket.data.roomId;
       if (!roomId || !hasRoom(roomId)) return;
+      const room = getRoom(roomId) as Room | undefined;
+      if (!room) return;
+      const user = room.users[socket.id];
+      if (!user || user.seat === null) return;
+
+      if (room.gameStatus === 'waiting') {
+        // lobby chat remains available to seated players
+      } else if (room.gameStatus === 'last_words') {
+        if (room.lastWordPlayerId !== socket.id) return;
+      } else if (room.gameStatus === 'day_speeches') {
+        const activePlayer = room.turnOrder && room.turnOrder[room.currentTurnIndex];
+        if (!activePlayer || activePlayer.id !== socket.id) return;
+      } else if (room.gameStatus === 'day_discussion') {
+        if (!user.isAlive) return;
+      } else {
+        return;
+      }
+
+      if (!user.isAlive && room.gameStatus !== 'last_words' && room.gameStatus !== 'waiting') return;
+
       io.to(roomId).emit('chat-message', {
         username: socket.data.username,
         text: text.trim(),

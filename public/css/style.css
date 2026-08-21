@@ -1,33 +1,174 @@
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
-body { background-color: #121212; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; overscroll-behavior: none; }
+html, body { width: 100%; height: 100%; }
+body {
+  background-color: #0d0d0d;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 
 .hidden { display: none !important; }
 
-/* Лобби */
-#lobby { display: flex; flex-direction: column; gap: 15px; width: 85%; max-width: 350px; }
-h1 { text-align: center; font-size: 24px; margin-bottom: 5px; color: #bb86fc; }
-.section-title { font-size: 13px; color: #888; margin-top: 5px; margin-bottom: -5px; }
-input, button { padding: 12px; border-radius: 8px; border: none; font-size: 16px; outline: none; }
-input[type="text"] { background: #1e1e1e; color: #fff; border: 1px solid #333; }
-button { background: #bb86fc; color: #121212; font-weight: bold; cursor: pointer; transition: 0.2s; }
-button:active { opacity: 0.8; }
-.btn-secondary { background: #2d2d2d; color: #fff; border: 1px solid #444; }
+#lobby, #room {
+  width: 100%;
+  height: 100vh;
+}
 
-/* Модальное окно настроек */
-#modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10; }
-.modal { background: #1e1e1e; padding: 20px; border-radius: 12px; width: 90%; max-width: 320px; border: 1px solid #333; display: flex; flex-direction: column; gap: 15px; }
-.modal h2 { font-size: 18px; color: #bb86fc; text-align: center; }
-.range-group { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: #ccc; }
-.range-group input[type="range"] { width: 100%; accent-color: #bb86fc; }
-.range-value { color: #03dac6; font-weight: bold; float: right; }
-.roles-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; color: #ccc; font-size: 13px; }
+/* Лобби */
+#lobby {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: url('/images/Lobby.jpg') center/cover no-repeat;
+}
+
+.lobby-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(15, 8, 8, 0.40), rgba(10, 10, 10, 0.72));
+  backdrop-filter: blur(2px);
+}
+
+.lobby-content {
+  position: relative;
+  z-index: 1;
+  width: min(90vw, 420px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+#lobby h1 {
+  font-size: clamp(32px, 7vw, 72px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d91616;
+  text-shadow: 0 0 20px rgba(217, 22, 22, 0.65);
+  font-weight: 900;
+}
+
+.lobby-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(80vw, 260px);
+}
+
+#lobby button,
+.modal button,
+#ready-btn-game,
+.ctrl-btn,
+.chat-input-area button {
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 700;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+#lobby button:active,
+.modal button:active,
+#ready-btn-game:active,
+.ctrl-btn:active,
+.chat-input-area button:active {
+  transform: translateY(1px);
+}
+
+.primary-btn,
+.modal button,
+#ready-btn-game {
+  background: #f3d77a;
+  color: #1a1200;
+  box-shadow: 0 0 18px rgba(243, 215, 122, 0.35);
+}
+
+.secondary-btn,
+.btn-secondary {
+  background: rgba(244, 215, 118, 0.82);
+  color: #1a1200;
+  border: 1px solid rgba(255, 237, 153, 0.5);
+}
+
+input, button { padding: 12px; border-radius: 8px; border: none; font-size: 16px; outline: none; }
+input[type="text"] {
+  width: 100%;
+  background: rgba(18, 18, 18, 0.75);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: inset 0 0 12px rgba(0,0,0,0.2);
+}
+
+/* Модальное окно */
+#modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.modal {
+  background: rgba(17, 17, 17, 0.96);
+  padding: 22px 18px 16px;
+  border-radius: 16px;
+  width: min(90vw, 360px);
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.modal h2 {
+  font-size: 26px;
+  color: #f1d772;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+.field-group { display: flex; flex-direction: column; gap: 8px; }
+.field-group label { font-size: 13px; color: #ddd; }
+.range-group { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #ddd; }
+.range-group input[type="range"] { width: 100%; accent-color: #f1d772; }
+.range-value { color: #f1d772; font-weight: bold; float: right; }
+.checkbox-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; color: #ddd;
+}
+.checkbox-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: #f1d772; }
+.roles-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; color: #ddd; font-size: 13px; }
 .roles-column { display: flex; flex-direction: column; gap: 7px; }
-.roles-column h3 { color: #03dac6; font-size: 13px; margin-bottom: 2px; }
+.roles-column h3 { color: #f1d772; font-size: 13px; margin-bottom: 2px; }
 .roles-column label { display: flex; align-items: center; gap: 6px; }
-.roles-column input[type="checkbox"] { width: 16px; height: 16px; accent-color: #bb86fc; }
+.roles-column input[type="checkbox"] { width: 16px; height: 16px; accent-color: #f1d772; }
 
 /* Комната */
-#room { width: 100%; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 10px; position: relative; }
+#room {
+  background: url('/images/Game_table.jpg') center/cover no-repeat;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+}
+#room::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 7, 11, 0.35);
+  backdrop-filter: blur(1px);
+}
+#room > * {
+  position: relative;
+  z-index: 1;
+}
 
 .room-header { text-align: center; display: flex; flex-direction: column; gap: 2px; width: 100%; }
 .room-title-label { font-size: 16px; font-weight: bold; color: #bb86fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px;}
