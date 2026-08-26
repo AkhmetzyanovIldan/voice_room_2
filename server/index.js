@@ -220,8 +220,12 @@ io.on('connection', (socket) => {
     const target = room && room.users[targetId];
     if (!room || room.gameStatus !== 'day_voting' || !voter || !voter.isAlive || voter.seat === null ||
         !target || !target.isAlive || target.seat === null) return;
+    if (Object.prototype.hasOwnProperty.call(room.votes, socket.id)) {
+      socket.emit('day-vote-ack', { accepted: false, reason: 'already-voted' });
+      return;
+    }
     room.votes[socket.id] = targetId;
-    socket.emit('day-vote-ack', { targetId });
+    socket.emit('day-vote-ack', { targetId, accepted: true });
     emitRoomUpdate(roomId);
     const alive = Object.values(room.users).filter(u => u.seat !== null && u.isAlive);
     if (alive.every(u => room.votes[u.id])) resolveDayVote(roomId);
@@ -284,7 +288,7 @@ function emitRoomUpdate(roomId) {
     seats: room.seats,
     gameStatus: room.gameStatus,
     lastWordPlayerId: room.lastWordPlayerId,
-    votes: Object.keys(room.votes || {}),
+    votes: room.votes || {},
     currentSpeakerId: currentSpeakerId
   });
 }

@@ -73,52 +73,62 @@
 
     <!-- КОМНАТА -->
     <div id="room" class="hidden">
-        <div class="room-header">
-            <div class="room-title-label" id="room-title-display">Название комнаты</div>
-            <div class="room-code-label">Код: <span id="room-code-display">----</span></div>
-            <div style="display:flex; gap:8px; align-items:center; justify-content:center;">
-                <div class="role-indicator" id="role-label">Режим: Наблюдатель</div>
-                <div class="role-indicator" id="player-role" style="font-weight:bold;">Вы - —</div>
+        <header class="room-header">
+            <button id="room-menu-btn" class="icon-btn" type="button">☰</button>
+            <div class="room-heading">
+                <div class="room-code-label">Код комнаты: <strong id="room-code-display">----</strong> ⧉</div>
+                <div class="role-indicator" id="role-label">Режим: Наблюдатель <span id="player-role">Вы —</span></div>
             </div>
-        </div>
+            <button id="listeners-toggle-btn" class="icon-btn" type="button" title="Слушатели">♟</button>
+        </header>
 
-        <!-- Игровая панель статусов и кнопки готовности -->
         <div class="game-status-panel">
             <div id="game-status-text">Статус: Ожидание игроков...</div>
             <div id="game-timer-text">--</div>
         </div>
 
-        <!-- Выпадающая панель списка слушателей -->
         <div id="listeners-panel" class="hidden">
             <h4>Слушатели (<span id="listeners-count-label">0</span>)</h4>
             <div id="listeners-list-content"></div>
         </div>
 
-        <!-- Основная область: Стол и Чат -->
-        <div class="room-main-area">
-            <div class="table-container" id="table-container">
-                <div class="table-center">
-                    <span>Стол</span>
-                    <span id="users-count">0 участников</span>
-                </div>
+        <main class="room-main-area">
+            <div class="table-container" id="table-container"></div>
+            <div id="voting-paper" class="voting-paper hidden">
+                <div class="voting-title">Голосование</div>
+                <div id="vote-results-list"></div>
+                <div class="voting-hint">Нажмите на игрока, чтобы проголосовать</div>
             </div>
             <button id="ready-btn-game" onclick="toggleReady()">Готов к игре</button>
-
+            <button id="role-card-btn" class="role-card" type="button"><span>РОЛЬ</span><strong id="role-card-value">Скрыто</strong></button>
             <div class="controls">
-                <button class="ctrl-btn" id="mic-btn" onclick="toggleMic()" disabled>🎤 Мик</button>
-                <button class="ctrl-btn active" id="audio-btn" onclick="toggleAudio()">🔊 Звук</button>
-                <button class="ctrl-btn" id="seat-action-btn" onclick="handleSeatAction()">🪑 Сесть</button>
-                <button class="ctrl-btn" id="listeners-toggle-btn" onclick="toggleListenersPanel()">👥 Слушатели</button>
-                <button class="ctrl-btn danger" onclick="leaveRoom()">🚪 Выйти</button>
+                <button class="ctrl-btn" id="mic-btn" onclick="toggleMic()" disabled>🎤<span>Мик</span></button>
+                <button class="ctrl-btn active" id="audio-btn" onclick="toggleAudio()">🔊<span>Звук</span></button>
+                <button class="ctrl-btn" id="chat-toggle-btn" type="button">💬<span>Чат</span></button>
             </div>
+        </main>
 
-            <div class="chat-container">
-                <div class="chat-messages" id="chat-messages"></div>
-                <div class="chat-input-area">
-                    <input type="text" id="chat-input" placeholder="Сообщение..." maxlength="150">
-                    <button type="button" id="chat-send-btn">➤</button>
-                </div>
-            </div>
+        <div id="chat-container" class="chat-container hidden">
+            <div class="chat-head">ЧАТ КОМНАТЫ <button id="chat-close-btn" type="button">×</button></div>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-input-area"><input type="text" id="chat-input" placeholder="Сообщение..." maxlength="150"><button type="button" id="chat-send-btn">➤</button></div>
+        </div>
+    </div>
+
+    <div id="room-menu-modal" class="room-modal hidden">
+        <div class="room-modal-card">
+            <h2>Меню комнаты</h2>
+            <button id="seat-action-btn" class="menu-action" type="button">🪑 Сесть за стол</button>
+            <button id="menu-leave-btn" class="menu-action danger" type="button">🚪 Выйти из комнаты</button>
+            <button id="menu-close-btn" class="menu-action secondary" type="button">Закрыть</button>
+        </div>
+    </div>
+
+    <div id="role-modal" class="room-modal hidden">
+        <div class="room-modal-card role-modal-card">
+            <h2>Ваша роль</h2>
+            <div id="role-modal-value" class="role-reveal">Роль ещё не назначена</div>
+            <button id="role-close-btn" class="menu-action secondary" type="button">Закрыть</button>
         </div>
     </div>
 

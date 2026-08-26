@@ -33,12 +33,25 @@
   const audioBtn = $('#audio-btn');
   const seatActionBtn = $('#seat-action-btn');
   const listenersToggleBtn = $('#listeners-toggle-btn');
+  const chatToggleBtn = $('#chat-toggle-btn');
+  const chatCloseBtn = $('#chat-close-btn');
+  const roomMenuBtn = $('#room-menu-btn');
+  const roomMenuModal = $('#room-menu-modal');
+  const menuCloseBtn = $('#menu-close-btn');
+  const menuLeaveBtn = $('#menu-leave-btn');
+  const roleCardBtn = $('#role-card-btn');
+  const roleCardValue = $('#role-card-value');
+  const roleModal = $('#role-modal');
+  const roleModalValue = $('#role-modal-value');
+  const roleCloseBtn = $('#role-close-btn');
 
   let currentRoomId = null;
   let myId = null;
   let mySeat = null;
   let isAudioOn = true;
   let nightActionSubmitted = false;
+  let hasVotedThisPhase = false;
+  let myRole = null;
 
   function getTelegramProfile() {
     const user = window.Telegram && window.Telegram.WebApp &&
@@ -103,26 +116,32 @@
   function renderSeats(maxSeats, users, seatsData, currentSpeakerId, gameStatus) {
     const container = document.getElementById('table-container');
     if (!container) return;
-    container.querySelectorAll('.seat').forEach(el => el.remove());
+    container.querySelectorAll('.seat-wrap, .seat').forEach(el => el.remove());
 
-    const totalSeats = maxSeats % 2 === 0 ? maxSeats : maxSeats + 1;
-    const rows = totalSeats / 2;
-    const seatSize = 40;
-    const rowGap = 8;
-    const layoutHeight = rows * seatSize + (rows - 1) * rowGap;
+    const totalSeats = maxSeats;
+    const leftColumnSeats = Math.ceil(totalSeats / 2);
+    const rows = leftColumnSeats;
+    const seatSize = 58;
+    const rowGap = 12;
+    const layoutHeight = rows * (seatSize + 18) + (rows - 1) * rowGap;
     const startY = Math.max(0, (container.clientHeight - layoutHeight) / 2);
 
     for (let i = 0; i < totalSeats; i++) {
-      const row = Math.floor(i / 2);
-      const side = i % 2;
-      const x = side === 0 ? 10 : container.clientWidth - seatSize - 10;
-      const y = startY + row * (seatSize + rowGap);
+      const side = i < leftColumnSeats ? 0 : 1;
+      const row = side === 0 ? i : i - leftColumnSeats;
+      const wrap = document.createElement('div');
+      wrap.className = 'seat-wrap';
+      wrap.style.left = `${side === 0 ? 4 : container.clientWidth - 76}px`;
+      wrap.style.top = `${startY + row * (seatSize + 18 + rowGap)}px`;
 
       const seatEl = document.createElement('div');
       seatEl.className = 'seat';
       seatEl.id = `seat-${i}`;
-      seatEl.style.left = `${x}px`;
-      seatEl.style.top = `${y}px`;
+      seatEl.style.top = '0px';
+      const numberEl = document.createElement('div');
+      numberEl.className = 'seat-number';
+      numberEl.textContent = String(i + 1);
+      wrap.appendChild(numberEl);
 
       const isBlockedSeat = i >= maxSeats;
       const userIdInSeat = isBlockedSeat ? null : seatsData[i];
@@ -131,7 +150,7 @@
         seatEl.innerText = '✕';
         seatEl.title = 'Место недоступно';
         seatEl.onclick = () => {};
-        container.appendChild(seatEl);
+        wrap.appendChild(seatEl); container.appendChild(wrap);
         continue;
       }
 
@@ -148,9 +167,12 @@
           seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%; font-size:11px;"><b>${user ? user.username[0] : ''}</b></div>`;
         }
 
-        if (user && !user.mic) seatEl.innerHTML += `<div style="position:absolute; bottom:0; right:0; font-size:10px;">🔇</div>`;
-        if (user && user.isReady) seatEl.innerHTML += `<div style="position:absolute; top:0; right:0; font-size:10px; background:rgba(0,255,0,0.7); border-radius:50%; width:12px; height:12px; text-align:center; line-height:12px;">✓</div>`;
-        if (user && user.isAlive === false) seatEl.innerHTML += `<div style="position:absolute; top:0; left:0; font-size:12px;">☠️</div>`;
+        if (gameStatus === 'waiting' && userIdInSeat === myId && user && user.isReady) {
+          seatEl.innerHTML += '<div class="seat-vote-check seat-ready-check">✓</div>';
+        }
+        if (gameStatus !== 'waiting' && user && user.isAlive === false) {
+          seatEl.innerHTML += '<div class="seat-dead-cross">×</div>';
+        }
 
         // If it's night and current user can act and is alive, clicking a seat is a night action
         const me = users && users[myId];
@@ -158,6 +180,7 @@
         if (gameStatus === 'day_voting' && me && me.isAlive) {
           seatEl.style.cursor = 'pointer';
           seatEl.onclick = () => {
+            if (hasVotedThisPhase) return;
             if (userIdInSeat !== myId && user && user.isAlive !== false) {
               appSocket.dayVote(userIdInSeat);
             }
@@ -186,6 +209,14 @@
           seatEl.onclick = () => { /* no-op for occupied seat */ };
         }
 
+        if (gameStatus === 'day_voting' && window.__lastRoomState && window.__lastRoomState.votes) {
+          const myVote = window.__lastRoomState.votes[myId];
+          if (myVote === userIdInSeat) {
+            seatEl.classList.add('selected-vote');
+            seatEl.insertAdjacentHTML('beforeend', '<div class="seat-vote-check">✓</div>');
+          }
+        }
+
         // show if this seat is the one we selected this night
         if (window.myNightTargetId && window.myNightTargetId === userIdInSeat) {
           if (!seatEl.querySelector('.target-marker')) {
@@ -199,7 +230,12 @@
         seatEl.onclick = () => takeSeat(i);
       }
 
-      container.appendChild(seatEl);
+      const nameEl = document.createElement('div');
+      nameEl.className = 'seat-name';
+      nameEl.textContent = userIdInSeat && users[userIdInSeat] ? users[userIdInSeat].username : '';
+      wrap.appendChild(seatEl);
+      wrap.appendChild(nameEl);
+      container.appendChild(wrap);
     }
   }
 
@@ -209,6 +245,8 @@
 
     const seatedUserIds = Object.values(seats || {});
     const listeners = allUsers.filter(u => !seatedUserIds.includes(u.id));
+    const listenersCount = document.getElementById('listeners-count-label');
+    if (listenersCount) listenersCount.innerText = String(listeners.length);
 
     const listContainer = document.getElementById('listeners-list-content');
     if (listContainer) {
@@ -274,7 +312,16 @@
 
   // --- event handlers that call socket APIs ---
   function takeSeat(index) { appSocket.takeSeat(index); }
-  function handleSeatAction() { if (mySeat !== null) { appSocket.leaveSeat(); } }
+  function handleSeatAction() {
+    if (mySeat !== null) appSocket.leaveSeat();
+    else {
+      const state = window.__lastRoomState;
+      const seats = state && state.seats ? state.seats : [];
+      const freeSeat = Object.keys(seats).find(index => seats[index] === null);
+      if (freeSeat !== undefined) appSocket.takeSeat(Number(freeSeat));
+    }
+    closeRoomMenu();
+  }
   function toggleReady() { appSocket.setReady(); }
   function sendChatMessage() { const input = chatInput; if (!input) return; const text = input.value.trim(); if (text.length > 0) { appSocket.sendChatMessage(text); input.value = ''; } }
 
@@ -291,7 +338,34 @@
     isAudioOn = !isAudioOn; document.querySelectorAll('audio').forEach(el => el.muted = !isAudioOn); if (audioBtn) { if (isAudioOn) { audioBtn.classList.add('active'); audioBtn.innerText = '🔊 Звук: Вкл'; } else { audioBtn.classList.remove('active'); audioBtn.innerText = '🔊 Звук: Выкл'; } }
   }
 
-  function leaveRoom() { if (window.lkRoom) { window.lkRoom.disconnect(); window.lkRoom = null; } window.location.reload(); }
+  function leaveRoom() {
+    if (window.lkRoom) { window.lkRoom.disconnect(); window.lkRoom = null; }
+    if (window.appSocket.socket.connected) {
+      window.appSocket.socket.disconnect();
+      window.appSocket.socket.connect();
+    }
+    if (roomSection) roomSection.classList.add('hidden');
+    if (lobby) lobby.classList.remove('hidden');
+    currentRoomId = null; myId = null; mySeat = null; hasVotedThisPhase = false;
+    closeRoomMenu();
+  }
+
+  function closeRoomMenu() { if (roomMenuModal) roomMenuModal.classList.add('hidden'); }
+  function toggleRoomMenu() { if (roomMenuModal) roomMenuModal.classList.toggle('hidden'); }
+  function toggleChatDrawer(force) {
+    const chat = document.getElementById('chat-container');
+    if (!chat) return;
+    chat.classList.toggle('hidden', typeof force === 'boolean' ? !force : !chat.classList.contains('hidden'));
+  }
+
+  function updateRoleCard() {
+    if (roleCardValue) roleCardValue.innerText = myRole ? 'Нажмите, чтобы открыть' : 'Скрыто';
+  }
+
+  function openRoleCard() {
+    if (roleModalValue) roleModalValue.innerText = myRole || 'Роль ещё не назначена';
+    if (roleModal) roleModal.classList.remove('hidden');
+  }
 
   function openModal(modal) {
     showError('');
@@ -365,6 +439,14 @@
   if (audioBtn) audioBtn.onclick = toggleAudio;
   if (seatActionBtn) seatActionBtn.onclick = handleSeatAction;
   if (listenersToggleBtn) listenersToggleBtn.onclick = () => { const panel = document.getElementById('listeners-panel'); if (!panel) return; panel.classList.toggle('hidden'); listenersToggleBtn.classList.toggle('active'); };
+  if (roomMenuBtn) roomMenuBtn.onclick = toggleRoomMenu;
+  if (menuCloseBtn) menuCloseBtn.onclick = closeRoomMenu;
+  if (menuLeaveBtn) menuLeaveBtn.onclick = leaveRoom;
+  if (roleCardBtn) roleCardBtn.onclick = openRoleCard;
+  if (roleCloseBtn) roleCloseBtn.onclick = () => roleModal && roleModal.classList.add('hidden');
+  if (seatActionBtn) seatActionBtn.onclick = handleSeatAction;
+  if (chatToggleBtn) chatToggleBtn.onclick = () => toggleChatDrawer();
+  if (chatCloseBtn) chatCloseBtn.onclick = () => toggleChatDrawer(false);
 
   // Wire appEvents to UI updates
   appEvents.on('room-joined', ({ roomId, roomName }) => {
@@ -413,11 +495,14 @@
 
   appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes, lastWordPlayerId }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
-    const chatContainer = document.querySelector('.chat-container'); if (chatContainer) { if (hasChat === false) chatContainer.classList.add('hidden'); else chatContainer.classList.remove('hidden'); }
+    const chatContainer = document.querySelector('.chat-container'); if (chatContainer && hasChat === false) chatContainer.classList.add('hidden');
     // keep last room state for helpers
-    window.__lastRoomState = { users, seats, gameStatus, votes, lastWordPlayerId };
+    window.__lastRoomState = { users, seats, gameStatus, votes: votes || {}, lastWordPlayerId };
+    if (gameStatus !== 'day_voting') hasVotedThisPhase = false;
+    if (gameStatus === 'day_voting' && votes && Object.prototype.hasOwnProperty.call(votes, myId)) hasVotedThisPhase = true;
     renderSeats(maxSeats, users, seats, currentSpeakerId, gameStatus);
     updateUI(users, seats, gameStatus);
+    renderVoting(votes || {}, users || {}, seats || {}, gameStatus === 'day_voting');
 
   // Ensure local microphone follows server-authoritative state (do NOT emit toggle to server here)
   try {
@@ -433,11 +518,34 @@
   });
 
   appEvents.on('voting-started', ({ timeLeft }) => {
+    hasVotedThisPhase = false;
+    document.getElementById('voting-paper')?.classList.remove('hidden');
     const statusEl = document.getElementById('game-status-text');
     if (statusEl) statusEl.innerText = '🗳️ Голосование. Выберите игрока за столом.';
     const timerEl = document.getElementById('game-timer-text');
     if (timerEl) timerEl.innerText = `Голосование. Осталось: ${timeLeft}с`;
     if (micBtn) micBtn.disabled = true;
+  });
+
+  function renderVoting(votes, users, seats, active) {
+    const paper = document.getElementById('voting-paper');
+    const list = document.getElementById('vote-results-list');
+    if (!paper || !list) return;
+    paper.classList.toggle('hidden', !active);
+    if (!active) return;
+    const groups = {};
+    Object.entries(votes).forEach(([voterId, targetId]) => {
+      const targetSeat = users[targetId] && users[targetId].seat;
+      const voterSeat = users[voterId] && users[voterId].seat;
+      if (targetSeat === null || targetSeat === undefined || voterSeat === null || voterSeat === undefined) return;
+      (groups[targetSeat] ||= []).push(voterSeat + 1);
+    });
+    list.innerHTML = Object.keys(groups).sort((a,b) => Number(a)-Number(b)).map(target => `<div class="vote-row"><span class="vote-target ${users[myId] && users[myId].seat === Number(target) ? 'mine' : ''}">${Number(target) + 1}</span><b>←</b>${groups[target].sort((a,b)=>a-b).map(v => `<span class="vote-voter ${users[myId] && users[myId].seat === v - 1 ? 'mine' : ''}">${v}</span>`).join('')}</div>`).join('') || '<em>голосов пока нет</em>';
+  }
+
+  appEvents.on('day-vote-ack', ({ accepted, reason }) => {
+    if (accepted) hasVotedThisPhase = true;
+    else if (reason === 'already-voted') hasVotedThisPhase = true;
   });
 
   appEvents.on('day-vote-result', ({ eliminatedPlayerName, tie, winner }) => {
@@ -489,6 +597,8 @@
       const role = data.role;
       const playerRoleEl = document.getElementById('player-role'); if (playerRoleEl) playerRoleEl.innerText = `Вы - ${role}`;
       window.myRole = role;
+      myRole = role;
+      updateRoleCard();
       if (statusEl) statusEl.innerText = `🎮 Игра началась — ваша роль: ${role}. Сейчас ночь.`;
     } else if (data && data.roomStatus) {
       if (statusEl) statusEl.innerText = '🎮 Игра началась! Идет фаза личных высказываний.';
@@ -553,7 +663,7 @@
 
   appEvents.on('game-ended', () => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '🏁 Игра окончена. Можете общаться или начать новую.'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = 'Игра завершена'; if (mySeat !== null && readyBtn) { readyBtn.style.display = 'inline-block'; readyBtn.innerText = 'Готов к игре'; readyBtn.classList.remove('ready-on'); }
     // clear private role after game
-    window.myRole = null; const playerRoleEl = document.getElementById('player-role'); if (playerRoleEl) playerRoleEl.innerText = 'Вы - —';
+    window.myRole = null; myRole = null; updateRoleCard(); const playerRoleEl = document.getElementById('player-role'); if (playerRoleEl) playerRoleEl.innerText = 'Вы - —';
   });
 
 })();

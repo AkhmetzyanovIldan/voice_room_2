@@ -33,7 +33,7 @@ function createGameEngine(io) {
             maxSeats: room.maxSeats,
             hasChat: room.hasChat,
             enabledRoles: room.enabledRoles,
-            votes: Object.keys(room.votes || {}),
+            votes: room.votes || {},
             users: publicUsers,
             seats: room.seats,
             gameStatus: room.gameStatus,
@@ -317,6 +317,9 @@ function createGameEngine(io) {
         const voter = room.users[voterId];
         const target = room.users[targetId];
         if (!voter || !voter.isAlive || voter.seat === null || !target || !target.isAlive || target.seat === null)
+            return;
+        // Голос нельзя менять или отдавать повторно в одной фазе.
+        if (Object.prototype.hasOwnProperty.call(room.votes, voterId))
             return;
         room.votes[voterId] = targetId;
         emitRoomUpdate(room.id);
