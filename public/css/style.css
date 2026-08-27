@@ -508,12 +508,12 @@ input[type="text"] {
 }
 
 #listeners-panel {
-  top: calc(83px + env(safe-area-inset-top));
+  top: calc(123px + env(safe-area-inset-top));
 }
 
 .room-header,
 .game-status-panel {
-  transform: translateY(8px);
+  transform: translateY(48px);
 }
 
 .controls {
