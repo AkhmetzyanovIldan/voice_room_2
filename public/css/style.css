@@ -465,7 +465,7 @@ input[type="text"] {
 }
 
 .lobby-actions {
-  transform: translateY(290px);
+  transform: translateY(200px);
 }
 
 #listeners-panel {
@@ -500,6 +500,77 @@ input[type="text"] {
   font-family: Georgia, serif;
   font-size: 12px;
   text-shadow: 0 2px 3px #000;
+}
+
+/* Room controls and Telegram Mini App safe area */
+#room {
+  padding-top: calc(38px + env(safe-area-inset-top));
+}
+
+#listeners-panel {
+  top: calc(83px + env(safe-area-inset-top));
+}
+
+.room-header,
+.game-status-panel {
+  transform: translateY(8px);
+}
+
+.controls {
+  align-items: stretch;
+}
+
+.controls .role-card {
+  position: static;
+  right: auto;
+  bottom: auto;
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: 54px;
+  margin: 0;
+  padding: 7px 4px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #17120e 0%, #090807 100%);
+  border-color: rgba(212, 175, 55, 0.35);
+  color: var(--luxury-gold-light);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 0, 0, 0.8);
+  font-family: Georgia, serif;
+  cursor: pointer;
+}
+
+.controls .role-card span,
+.controls .role-card strong {
+  display: block;
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.controls .role-card strong {
+  margin-top: 3px;
+  color: #e5e0d8;
+  font-weight: 500;
+}
+
+.chat-input-area input {
+  /* Prevents browser zoom when the mobile chat field receives focus. */
+  font-size: 16px;
+}
+
+/* Chat must never participate in the room flex layout. */
+#room > #chat-container {
+  position: fixed;
+  left: 50%;
+  right: auto;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  width: min(92vw, 520px);
+  margin: 0;
+  transform: translateX(-50%);
+  z-index: 30;
 }
 
 /* Luxury styling for lobby title and room creation dialog */
