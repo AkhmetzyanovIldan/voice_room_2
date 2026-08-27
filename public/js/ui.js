@@ -189,7 +189,11 @@
           // clicking targets another player
           seatEl.style.cursor = 'pointer';
           seatEl.onclick = () => {
-            if (userIdInSeat === myId) { console.log('night-action: cannot target self'); return; } // don't target self
+            if (userIdInSeat === myId && myRole !== 'doctor') { console.log('night-action: cannot target self'); return; }
+            if (userIdInSeat === myId && window.__lastRoomState && window.__lastRoomState.doctorSelfHealUsedLastNight) {
+              console.log('night-action: doctor self-heal is available every other night');
+              return;
+            }
             const actionType = myRole === 'mafia' ? 'mafia_kill' : myRole === 'doctor' ? 'doctor_heal' : myRole === 'cop' ? 'cop_check' : null;
             if (!actionType) return;
             if (!currentRoomId) { console.warn('no currentRoomId'); return; }
@@ -493,11 +497,11 @@
   window.myNightTargetId = null;
   nightActionSubmitted = false;
 
-  appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes, lastWordPlayerId }) => {
+  appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes, lastWordPlayerId, doctorSelfHealUsedLastNight }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
     const chatContainer = document.querySelector('.chat-container'); if (chatContainer && hasChat === false) chatContainer.classList.add('hidden');
     // keep last room state for helpers
-    window.__lastRoomState = { users, seats, gameStatus, votes: votes || {}, lastWordPlayerId };
+    window.__lastRoomState = { users, seats, gameStatus, votes: votes || {}, lastWordPlayerId, doctorSelfHealUsedLastNight };
     if (gameStatus !== 'day_voting') hasVotedThisPhase = false;
     if (gameStatus === 'day_voting' && votes && Object.prototype.hasOwnProperty.call(votes, myId)) hasVotedThisPhase = true;
     renderSeats(maxSeats, users, seats, currentSpeakerId, gameStatus);

@@ -174,7 +174,10 @@ export function registerRoomSocket(io: Server, gameEngine: GameEngine) {
         if (actor.role === 'mafia') { room.nightActions.mafiaTarget = targetId; accepted = true; }
       }
       if (actionType === 'doctor_heal') {
-        if (actor.role === 'doctor') { room.nightActions.doctorTarget = targetId; accepted = true; }
+        if (actor.role === 'doctor' &&
+          (targetId !== socket.id || !room.doctorSelfHealUsedLastNight)) {
+          room.nightActions.doctorTarget = targetId; accepted = true;
+        }
       }
       if (actionType === 'cop_check') {
         if (actor.role === 'cop') {

@@ -36,4 +36,5 @@ export interface Room {
   turnOrder: Player[];
   timer: any;
   nightActions: NightActions;
+  doctorSelfHealUsedLastNight: boolean;
 }

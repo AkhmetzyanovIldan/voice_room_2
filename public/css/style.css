@@ -24,7 +24,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: url('/images/Lobby.jpg') center/cover no-repeat;
+  background: #080706 url('/images/Lobby.jpg') center/contain no-repeat;
 }
 
 .lobby-overlay {
@@ -247,16 +247,16 @@ input[type="text"] {
 .seat-vote-check { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border: 2px solid #22d3ee; border-radius: 50%; background: rgba(34,211,238,.28); color: #a5f3fc; font-size: 25px; font-weight: bold; }
 .seat-ready-check { border-color: #22d3ee; background: rgba(34,211,238,.28); color: #a5f3fc; }
 .seat-dead-cross { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border: 2px solid #681624; border-radius: 50%; background: rgba(91,16,24,.48); color: #b12b43; font-size: 50px; line-height: 1; font-weight: 300; text-shadow: 0 1px 4px #000; }
-.seat-wrap { position: absolute; width: 72px; text-align: center; }
+.seat-wrap { position: absolute; width: 72px; height: 82px; text-align: center; z-index: 3; }
 .seat-number { position: absolute; top: -4px; right: -1px; z-index: 4; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #7c1a1a; color: #fff; border: 1px solid #aa3333; font-size: 11px; font-weight: 700; }
-.seat-name { width: 72px; min-height: 14px; margin-top: 3px; color: #d4c5b3; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat-name { position: absolute; top: 62px; left: 0; z-index: 5; display: block; width: 58px; height: 14px; min-height: 14px; margin: 0; color: #d4c5b3; font-size: 11px; line-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; text-shadow: 0 2px 3px #000; }
 #ready-btn-game { background: #2e7d32; color: white; border-radius: 12px; padding: 9px 22px; }
 #ready-btn-game.ready-on { background: #7c1a1a; }
 .controls { width: 100%; max-width: 360px; margin: 0; flex-wrap: nowrap; gap: 8px; }
 .ctrl-btn { min-width: 0; height: 54px; padding: 7px; flex-direction: column; background: #17110f; border: 1px solid rgba(212,175,55,.35); color: #d4af37; }
 .ctrl-btn span { font-size: 10px; }
 .ctrl-btn.active { background: #17110f; color: #e2c17c; border-color: #d4af37; }
-.chat-container { position: absolute; left: 12px; right: 12px; bottom: 82px; z-index: 8; width: auto; height: 190px; min-height: 0; background: rgba(20,14,12,.96); border: 1px solid rgba(212,175,55,.5); border-radius: 16px; box-shadow: 0 12px 30px #000; }
+.chat-container { position: absolute; left: 12px; right: 12px; bottom: 82px; z-index: 8; width: auto; max-width: 520px; margin: 0 auto; transform: none; height: 190px; min-height: 0; background: rgba(20,14,12,.96); border: 1px solid rgba(212,175,55,.5); border-radius: 16px; box-shadow: 0 12px 30px #000; }
 .chat-head { padding: 8px 10px; color: #e2c17c; font-size: 11px; font-weight: bold; border-bottom: 1px solid #3a2a1d; }
 .chat-head button { float: right; padding: 0; background: none; color: #8a7b70; font-size: 18px; }
 .chat-msg { background: transparent; padding: 3px 5px; }
@@ -280,3 +280,279 @@ input[type="text"] {
 .role-card span, .role-card strong { display: block; font-size: 9px; }
 .role-card strong { color: #e5e0d8; font-weight: 500; margin-top: 3px; }
 .role-reveal { margin: 12px 0; text-align: center; color: #e2c17c; font-size: 22px; font-weight: bold; }
+
+/* Dark luxury theme: visual treatment for the current UI */
+:root {
+  --luxury-gold: #b18a4a;
+  --luxury-gold-light: #d2ae6c;
+  --luxury-wood-black: #080706;
+  --luxury-wood-dark: #100c09;
+  --luxury-wood: #1a120d;
+  --luxury-leather: #15100c;
+  --luxury-leather-light: #2b1c12;
+  --luxury-red: #64100d;
+  --luxury-red-dark: #300705;
+  --luxury-text: #d2bd98;
+  --luxury-text-muted: #756b5d;
+}
+
+body {
+  background: var(--luxury-wood-black);
+  color: var(--luxury-text);
+  font-family: Georgia, serif;
+}
+
+#lobby {
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.lobby-overlay {
+  background: linear-gradient(180deg, rgba(15, 8, 8, 0.48), rgba(8, 7, 6, 0.82));
+}
+
+#lobby h1 {
+  color: var(--luxury-gold-light);
+  text-shadow: 0 2px 4px #000, 0 0 20px rgba(177, 138, 74, 0.35);
+  font-family: Georgia, serif;
+  letter-spacing: 0.14em;
+}
+
+#lobby button,
+.modal button,
+#ready-btn-game,
+.ctrl-btn,
+.chat-input-area button,
+.menu-action {
+  font-family: Georgia, serif;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+
+.primary-btn,
+.modal button:not(.btn-secondary),
+#ready-btn-game {
+  background: linear-gradient(145deg, #17120e 0%, #090807 100%);
+  color: var(--luxury-gold-light);
+  border: 1px solid rgba(177, 138, 74, 0.55);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 0, 0, 0.8);
+}
+
+.secondary-btn,
+.btn-secondary {
+  background: linear-gradient(180deg, #2b1c12, #15100c);
+  color: var(--luxury-text);
+  border: 1px solid rgba(177, 138, 74, 0.4);
+}
+
+#lobby button:hover,
+.modal button:hover,
+.ctrl-btn:hover,
+.menu-action:hover {
+  border-color: rgba(210, 174, 108, 0.8);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.9), 0 0 8px rgba(177, 138, 74, 0.12), inset 0 0 12px rgba(0, 0, 0, 0.7);
+}
+
+.modal,
+.room-modal-card {
+  background: linear-gradient(145deg, rgba(26, 18, 13, 0.98), rgba(12, 9, 7, 0.98));
+  border-color: rgba(177, 138, 74, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), inset 0 0 18px rgba(0, 0, 0, 0.65);
+}
+
+.modal h2,
+.room-modal-card h2,
+.roles-column h3 {
+  color: var(--luxury-gold-light);
+  font-family: Georgia, serif;
+}
+
+input[type="text"] {
+  background: rgba(8, 7, 6, 0.82);
+  color: var(--luxury-text);
+  border-color: rgba(177, 138, 74, 0.35);
+}
+
+#room {
+  background-color: var(--luxury-wood-black);
+  color: var(--luxury-text);
+}
+
+.room-code-label,
+.chat-head,
+.room-modal-card h2,
+.role-card,
+.role-reveal {
+  color: var(--luxury-gold-light);
+}
+
+.icon-btn,
+.game-status-panel,
+.chat-container,
+.role-card {
+  background: rgba(20, 14, 12, 0.94);
+  border-color: rgba(177, 138, 74, 0.45);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.75), inset 0 0 12px rgba(0, 0, 0, 0.65);
+}
+
+.icon-btn,
+.ctrl-btn {
+  color: var(--luxury-gold-light);
+}
+
+.seat {
+  background: radial-gradient(circle at 50% 42%, #17110d 0%, #0c0907 60%, #050403 100%);
+  border-color: rgba(177, 138, 74, 0.55);
+  color: var(--luxury-gold-light);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.9), inset 0 0 12px rgba(0, 0, 0, 0.9), inset 0 0 2px rgba(210, 174, 108, 0.35);
+}
+
+.seat.occupied {
+  background: #17100d;
+  border-color: var(--luxury-gold);
+}
+
+.seat-number {
+  background: radial-gradient(circle at 35% 30%, #8d2b27 0%, #5d100e 45%, #270504 100%);
+  border-color: rgba(142, 74, 54, 0.65);
+  color: #d6b999;
+  font-family: Georgia, serif;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.08);
+}
+
+.seat-name {
+  color: #a99980;
+  font-family: Georgia, serif;
+  text-shadow: 0 2px 3px #000;
+}
+
+.seat > img {
+  filter: brightness(0.82) contrast(1.08);
+  box-shadow: inset 0 0 10px #000, 0 2px 8px #000;
+}
+
+.ctrl-btn {
+  background: linear-gradient(145deg, #17120e 0%, #090807 100%);
+  border-color: rgba(150, 126, 88, 0.35);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 0, 0, 0.8);
+}
+
+.ctrl-btn.active {
+  background: linear-gradient(145deg, #2b1c12, #100c09);
+  color: var(--luxury-gold-light);
+  border-color: rgba(210, 174, 108, 0.75);
+}
+
+.ctrl-btn.danger,
+.menu-action.danger {
+  background: linear-gradient(180deg, #681714 0%, #430b09 48%, #270604 100%);
+  border-color: rgba(119, 32, 27, 0.8);
+  color: #d0bea0;
+}
+
+.chat-msg {
+  background: rgba(43, 28, 18, 0.42);
+}
+
+.chat-msg .author,
+.room-code-label strong {
+  color: var(--luxury-gold-light);
+}
+
+.error {
+  color: #c47b6f;
+}
+
+.lobby-actions {
+  transform: translateY(290px);
+}
+
+#listeners-panel {
+  top: 75px;
+  right: 15px;
+  width: 200px;
+  max-height: 180px;
+  padding: 10px;
+  background: linear-gradient(145deg, rgba(26, 18, 13, 0.98), rgba(12, 9, 7, 0.98));
+  border: 1px solid rgba(177, 138, 74, 0.45);
+  border-radius: 8px;
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.85),
+    inset 0 0 14px rgba(0, 0, 0, 0.7);
+  color: var(--luxury-text);
+}
+
+#listeners-panel h4 {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(177, 138, 74, 0.28);
+  color: var(--luxury-gold-light);
+  font-family: Georgia, serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.listener-item {
+  padding: 5px 2px;
+  color: #c4b092;
+  font-family: Georgia, serif;
+  font-size: 12px;
+  text-shadow: 0 2px 3px #000;
+}
+
+/* Luxury styling for lobby title and room creation dialog */
+#lobby h1 {
+  margin: 0;
+  color: var(--luxury-gold-light);
+  font-family: Georgia, serif;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow: 0 2px 4px #000, 0 0 20px rgba(177, 138, 74, 0.35);
+}
+
+#create-room-modal,
+#join-room-modal {
+  background: linear-gradient(145deg, rgba(26, 18, 13, 0.98), rgba(12, 9, 7, 0.98));
+  border: 1px solid rgba(177, 138, 74, 0.55);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), inset 0 0 18px rgba(0, 0, 0, 0.65);
+}
+
+#create-room-modal h2,
+#join-room-modal h2 {
+  color: var(--luxury-gold-light);
+  font-family: Georgia, serif;
+  text-shadow: 0 2px 3px #000;
+}
+
+#create-room-modal .field-group label,
+#create-room-modal .range-group,
+#create-room-modal .checkbox-row,
+#create-room-modal .roles-settings,
+#join-room-modal .field-group label {
+  color: #c4b092;
+  font-family: Georgia, serif;
+}
+
+#create-room-modal .roles-column h3 {
+  color: var(--luxury-gold-light);
+  font-family: Georgia, serif;
+}
+
+#create-room-modal > button:not(.btn-secondary),
+#join-room-modal > button:not(.btn-secondary) {
+  background: linear-gradient(145deg, #17120e 0%, #090807 100%);
+  border: 1px solid rgba(177, 138, 74, 0.55);
+  color: var(--luxury-gold-light);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 0, 0, 0.8);
+}
+
+#create-room-modal > button.btn-secondary,
+#join-room-modal > button.btn-secondary {
+  background: linear-gradient(180deg, #2b1c12, #15100c);
+  border: 1px solid rgba(177, 138, 74, 0.4);
+  color: var(--luxury-text);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), inset 0 0 12px rgba(0, 0, 0, 0.65);
+}

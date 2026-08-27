@@ -26,7 +26,8 @@ function createRoom(roomId, opts) {
         currentTurnIndex: 0,
         turnOrder: [],
         timer: null,
-        nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null }
+        nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null },
+        doctorSelfHealUsedLastNight: false
     }, opts || {});
     // init seats
     for (let i = 0; i < room.maxSeats; i++)

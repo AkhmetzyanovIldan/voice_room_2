@@ -21,7 +21,8 @@ function createRoom(roomId: string, opts: Partial<Room>) {
     currentTurnIndex: 0,
     turnOrder: [],
     timer: null,
-    nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null }
+    nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null },
+    doctorSelfHealUsedLastNight: false
   }, opts || {}) as Room;
 
   // init seats

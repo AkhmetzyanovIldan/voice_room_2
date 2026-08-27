@@ -178,7 +178,8 @@ function registerRoomSocket(io, gameEngine) {
                 }
             }
             if (actionType === 'doctor_heal') {
-                if (actor.role === 'doctor') {
+                if (actor.role === 'doctor' &&
+                    (targetId !== socket.id || !room.doctorSelfHealUsedLastNight)) {
                     room.nightActions.doctorTarget = targetId;
                     accepted = true;
                 }

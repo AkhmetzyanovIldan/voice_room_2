@@ -53,7 +53,8 @@ io.on('connection', (socket) => {
       turnOrder: [],
       timer: null,
       // Mafia game state (initialized for game usage)
-      nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null }
+      nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null },
+      doctorSelfHealUsedLastNight: false
       ,
       votes: {},
       nightActionActors: {},
@@ -192,7 +193,10 @@ io.on('connection', (socket) => {
       if (actor.role === 'mafia') { room.nightActions.mafiaTarget = targetId; accepted = true; }
     }
     if (actionType === 'doctor_heal') {
-      if (actor.role === 'doctor') { room.nightActions.doctorTarget = targetId; accepted = true; }
+      if (actor.role === 'doctor' &&
+        (targetId !== socket.id || !room.doctorSelfHealUsedLastNight)) {
+        room.nightActions.doctorTarget = targetId; accepted = true;
+      }
     }
     if (actionType === 'cop_check') {
       if (actor.role === 'cop') {
@@ -288,6 +292,7 @@ function emitRoomUpdate(roomId) {
     seats: room.seats,
     gameStatus: room.gameStatus,
     lastWordPlayerId: room.lastWordPlayerId,
+    doctorSelfHealUsedLastNight: room.doctorSelfHealUsedLastNight,
     votes: room.votes || {},
     currentSpeakerId: currentSpeakerId
   });
@@ -404,6 +409,9 @@ function resolveNight(roomId) {
   const { mafiaTarget, doctorTarget } = room.nightActions || {};
   let killedPlayerName = null;
 
+  const doctor = Object.values(room.users).find(u => u.role === 'doctor');
+  room.doctorSelfHealUsedLastNight = !!doctor && doctorTarget === doctor.id;
+
   console.log(`resolveNight ${roomId}: mafia -> ${mafiaTarget}, doctor -> ${doctorTarget}, cop -> ${room.nightActions && room.nightActions.copTarget}`);
 
   if (mafiaTarget && mafiaTarget !== doctorTarget) {
@@ -518,6 +526,8 @@ function checkVictory(room) {
     .filter(u => getClan(u.role) !== 'mafia')
     .reduce((sum, u) => sum + getVotePower(u.role), 0);
   if (mafiaPower === 0) return 'peaceful';
+  if (alive.filter(u => getClan(u.role) === 'mafia').length === 1 &&
+      alive.filter(u => getClan(u.role) !== 'mafia').length === 1) return 'mafia';
   if (mafiaPower >= peacefulPower) return 'mafia';
   return null;
 }

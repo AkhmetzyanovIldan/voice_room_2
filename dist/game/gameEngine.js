@@ -38,6 +38,7 @@ function createGameEngine(io) {
             seats: room.seats,
             gameStatus: room.gameStatus,
             lastWordPlayerId: room.lastWordPlayerId,
+            doctorSelfHealUsedLastNight: room.doctorSelfHealUsedLastNight,
             currentSpeakerId: currentSpeakerId
         });
     }
@@ -80,6 +81,7 @@ function createGameEngine(io) {
         if (seated.length === 0)
             return;
         room.nightActions = { mafiaTarget: null, doctorTarget: null, copTarget: null };
+        room.doctorSelfHealUsedLastNight = false;
         room.votes = {};
         assignRoles(seated);
         seated.forEach((player) => {
@@ -123,6 +125,8 @@ function createGameEngine(io) {
             return;
         const { mafiaTarget, doctorTarget } = room.nightActions || {};
         let killedPlayerName = null;
+        const doctor = Object.values(room.users).find((u) => u.role === 'doctor');
+        room.doctorSelfHealUsedLastNight = !!doctor && doctorTarget === doctor.id;
         console.log(`resolveNight ${roomId}: mafia -> ${mafiaTarget}, doctor -> ${doctorTarget}, cop -> ${room.nightActions && room.nightActions.copTarget}`);
         if (mafiaTarget && mafiaTarget !== doctorTarget) {
             const victim = room.users[mafiaTarget];
@@ -242,6 +246,9 @@ function createGameEngine(io) {
             .reduce((sum, u) => sum + getVotePower(u.role), 0);
         if (mafiaPower === 0)
             return 'peaceful';
+        if (alive.filter((u) => getClan(u.role) === 'mafia').length === 1 &&
+            alive.filter((u) => getClan(u.role) !== 'mafia').length === 1)
+            return 'mafia';
         if (mafiaPower >= peacefulPower)
             return 'mafia';
         return null;
