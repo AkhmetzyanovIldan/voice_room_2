@@ -74,12 +74,20 @@
     <!-- КОМНАТА -->
     <div id="room" class="hidden">
         <header class="room-header">
-            <button id="room-menu-btn" class="icon-btn" type="button">☰</button>
+            <button id="room-menu-btn" class="icon-btn" type="button" aria-label="Меню комнаты">
+                <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                    <path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z" fill="currentColor" />
+                </svg>
+            </button>
             <div class="room-heading">
                 <div class="room-code-label">Код комнаты: <strong id="room-code-display">----</strong></div>
                 <div class="role-indicator" id="role-label">Режим: Наблюдатель <span id="player-role">Вы —</span></div>
             </div>
-            <button id="listeners-toggle-btn" class="icon-btn" type="button" title="Наблюдатели">♟</button>
+            <button id="listeners-toggle-btn" class="icon-btn" type="button" title="Наблюдатели" aria-label="Наблюдатели">
+                <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zM4 20c0-2.21 3.58-4 8-4s8 1.79 8 4v1H4v-1z" fill="currentColor" />
+                </svg>
+            </button>
         </header>
 
         <div class="game-status-panel">

@@ -16,3 +16,20 @@ window.getSeatIndexByUserId = function (userId) {
 // expose to global
 function getSeatIndexByUserId(id) { return window.getSeatIndexByUserId(id); }
 window.getSeatIndexByUserId = getSeatIndexByUserId;
+
+// Fix mobile viewport 100vh issues: set CSS variable --vh based on real innerHeight
+(function () {
+  function setVh() {
+    try {
+      document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`);
+    } catch (e) { /* ignore */ }
+  }
+  setVh();
+  window.addEventListener('resize', setVh);
+  // Try to react to Telegram WebApp viewport changes if available
+  if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.onEvent === 'function') {
+    try {
+      window.Telegram.WebApp.onEvent('viewportChanged', setVh);
+    } catch (e) { /* ignore */ }
+  }
+})();
