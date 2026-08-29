@@ -255,7 +255,7 @@
     const listContainer = document.getElementById('listeners-list-content');
     if (listContainer) {
       listContainer.innerHTML = '';
-      if (listeners.length === 0) listContainer.innerHTML = '<div class="listener-item" style="color:#666;">Нет слушателей</div>';
+          if (listeners.length === 0) listContainer.innerHTML = '<div class="listener-item" style="color:#666;">нет наблюдателей</div>';
       else listeners.forEach(l => { const div = document.createElement('div'); div.className = 'listener-item'; div.innerText = `👤 ${l.username}`; listContainer.appendChild(div); });
     }
 
@@ -362,13 +362,77 @@
     chat.classList.toggle('hidden', typeof force === 'boolean' ? !force : !chat.classList.contains('hidden'));
   }
 
-  function updateRoleCard() {
-    if (roleCardValue) roleCardValue.innerText = myRole ? 'Нажмите, чтобы открыть' : 'Скрыто';
-  }
+  function showRoleCardImage(role) {
+      if (!role) return;
+      // map role ids to image filenames in public/carts
+      const map = {
+        mafia: 'mafia_cart.png',
+        don: 'don_cart.png',
+        doctor: 'doc_cart.png',
+        cop: 'cop_cart.png',
+        // fallback for roles without specific art
+        default: 'civilian_cart.png'
+      };
+      const file = map[role] || map.default;
+      const overlay = document.createElement('div');
+      overlay.className = 'role-card-overlay';
+      // base styles
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.background = 'rgba(0,0,0,0.0)';
+      overlay.style.zIndex = '1000';
+      overlay.style.transition = 'background 250ms ease';
+
+      const img = document.createElement('img');
+      img.src = `/carts/${file}`;
+      img.alt = role;
+      img.style.maxWidth = '80%';
+      img.style.maxHeight = '80%';
+      img.style.borderRadius = '12px';
+      img.style.boxShadow = '0 12px 30px rgba(0,0,0,0.6)';
+      // start from invisible and slightly scaled down
+      img.style.opacity = '0';
+      img.style.transform = 'scale(0.96) translateY(6px)';
+      img.style.transition = 'opacity 220ms ease, transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1)';
+
+      overlay.appendChild(img);
+      document.body.appendChild(overlay);
+
+      // allow click to dismiss immediately
+      overlay.addEventListener('click', () => {
+        try { overlay.remove(); } catch (e) { /* ignore */ }
+      });
+
+      // force layout then animate in
+      requestAnimationFrame(() => {
+        overlay.style.background = 'rgba(0,0,0,0.6)';
+        img.style.opacity = '1';
+        img.style.transform = 'scale(1) translateY(0)';
+      });
+
+      // show for ~3 seconds total
+      const visibleDuration = 2700; // ms before starting fade-out
+      const totalDuration = 3000; // ms until removed
+      setTimeout(() => {
+        // animate out: background & image
+        overlay.style.background = 'rgba(0,0,0,0)';
+        img.style.opacity = '0';
+        img.style.transform = 'scale(1.04) translateY(-6px)';
+      }, visibleDuration);
+
+      setTimeout(() => { try { overlay.remove(); } catch (e) { /* ignore */ } }, totalDuration);
+    }
+
+    function updateRoleCard() {
+      if (roleCardValue) roleCardValue.innerText = myRole ? 'Нажмите, чтобы открыть' : 'Скрыто';
+    }
 
   function openRoleCard() {
-    if (roleModalValue) roleModalValue.innerText = myRole || 'Роль ещё не назначена';
-    if (roleModal) roleModal.classList.remove('hidden');
+    // show the same image card when user clicks the role-card button (only visible to owner)
+    try { showRoleCardImage(myRole); } catch (e) { console.warn('showRoleCardImage failed', e); }
   }
 
   function openModal(modal) {
@@ -500,6 +564,7 @@
   appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes, lastWordPlayerId, doctorSelfHealUsedLastNight }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
     const chatContainer = document.querySelector('.chat-container'); if (chatContainer && hasChat === false) chatContainer.classList.add('hidden');
+
     // keep last room state for helpers
     window.__lastRoomState = { users, seats, gameStatus, votes: votes || {}, lastWordPlayerId, doctorSelfHealUsedLastNight };
     if (gameStatus !== 'day_voting') hasVotedThisPhase = false;
@@ -603,6 +668,8 @@
       window.myRole = role;
       myRole = role;
       updateRoleCard();
+      // Show role image card for 2 seconds immediately after role distribution
+      try { showRoleCardImage(role); } catch (e) { console.warn('showRoleCardImage failed', e); }
       if (statusEl) statusEl.innerText = `🎮 Игра началась — ваша роль: ${role}. Сейчас ночь.`;
     } else if (data && data.roomStatus) {
       if (statusEl) statusEl.innerText = '🎮 Игра началась! Идет фаза личных высказываний.';
