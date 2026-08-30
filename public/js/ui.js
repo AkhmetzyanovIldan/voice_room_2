@@ -52,6 +52,65 @@
   let nightActionSubmitted = false;
   let hasVotedThisPhase = false;
   let myRole = null;
+  let pendingAction = null;
+
+  function addEventFeedItem(message, type = 'info') {
+    const feed = document.getElementById('event-feed');
+    const list = document.getElementById('event-feed-list');
+    if (!feed || !list) return;
+    const item = document.createElement('div');
+    item.className = `event-feed-item ${type === 'alert' ? 'alert' : type === 'success' ? 'success' : ''}`.trim();
+    item.textContent = message;
+    list.appendChild(item);
+    while (list.children.length > 7) list.removeChild(list.firstChild);
+    feed.classList.remove('hidden');
+    list.scrollTop = list.scrollHeight;
+  }
+
+  function clearPhaseUI() {
+    const votingPaper = document.getElementById('voting-paper');
+    const eventFeed = document.getElementById('event-feed');
+    if (votingPaper) votingPaper.classList.add('hidden');
+    if (eventFeed) eventFeed.classList.add('hidden');
+    const list = document.getElementById('event-feed-list');
+    if (list) list.innerHTML = '';
+    const modal = document.getElementById('action-confirm-modal');
+    if (modal) modal.classList.add('hidden');
+    pendingAction = null;
+    hasVotedThisPhase = false;
+    nightActionSubmitted = false;
+    window.myNightTargetId = null;
+  }
+
+  function getChatAllowed() {
+    if (!window.__lastRoomState || !myId) return true;
+    const me = window.__lastRoomState.users && window.__lastRoomState.users[myId];
+    if (!me) return true;
+    const gameStatus = window.__lastRoomState.gameStatus;
+    if (gameStatus !== 'waiting' && me.seat !== null) return false;
+    if (gameStatus === 'waiting') return true;
+    return false;
+  }
+
+  function renderActionConfirm({ title, message, onConfirm }) {
+    const modal = document.getElementById('action-confirm-modal');
+    const text = document.getElementById('action-confirm-text');
+    const confirmBtn = document.getElementById('action-confirm-yes');
+    const cancelBtn = document.getElementById('action-confirm-no');
+    if (!modal || !text || !confirmBtn || !cancelBtn) return;
+    pendingAction = { onConfirm };
+    text.textContent = message || title || 'Вы уверены?';
+    modal.classList.remove('hidden');
+    confirmBtn.onclick = () => {
+      modal.classList.add('hidden');
+      if (pendingAction && pendingAction.onConfirm) pendingAction.onConfirm();
+      pendingAction = null;
+    };
+    cancelBtn.onclick = () => {
+      modal.classList.add('hidden');
+      pendingAction = null;
+    };
+  }
 
   function getTelegramProfile() {
     const user = window.Telegram && window.Telegram.WebApp &&
@@ -116,28 +175,65 @@
   function renderSeats(maxSeats, users, seatsData, currentSpeakerId, gameStatus) {
     const container = document.getElementById('table-container');
     if (!container) return;
+
+    const signature = JSON.stringify({ maxSeats, seatsData, currentSpeakerId, gameStatus, targetId: window.myNightTargetId });
+    if (container.dataset.seatSignature === signature && container.querySelector('.seat-wrap')) return;
+    container.dataset.seatSignature = signature;
     container.querySelectorAll('.seat-wrap, .seat').forEach(el => el.remove());
 
     const totalSeats = maxSeats;
     const leftColumnSeats = Math.ceil(totalSeats / 2);
-    const rows = leftColumnSeats;
-    const seatSize = 58;
-    const rowGap = 12;
-    const layoutHeight = rows * (seatSize + 18) + (rows - 1) * rowGap;
-    const startY = Math.max(0, (container.clientHeight - layoutHeight) / 2);
+    const rightColumnSeats = totalSeats - leftColumnSeats;
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+    const statusPanel = document.querySelector('.game-status-panel');
+    const controlsPanel = document.querySelector('.controls');
+    const room = document.getElementById('room');
+    if (room && statusPanel && controlsPanel) {
+      const roomTop = room.getBoundingClientRect().top;
+      const statusBottom = statusPanel.getBoundingClientRect().bottom - roomTop;
+      const controlsTop = controlsPanel.getBoundingClientRect().top - roomTop;
+      const layoutHeight = Math.max(230, controlsTop - statusBottom - 24);
+      container.style.height = `${layoutHeight}px`;
+    }
+
+    const nameHeight = 18;
+    const gapBetweenAvatarAndName = 8;
+    const gapBetweenPlayers = 10;
+    const maxAvatarSize = 58;
+    const requiredSeat = gapBetweenAvatarAndName + nameHeight + gapBetweenPlayers;
+    const layoutHeight = container.clientHeight || 320;
+    const availableHeight = Math.max(0, layoutHeight - 16);
+    const minAvatarSize = clamp((availableHeight / 4) - requiredSeat, 26, maxAvatarSize);
+    const maxPlayersInColumn = Math.max(4, Math.max(leftColumnSeats, rightColumnSeats));
+    const sharedAvatarSize = clamp((availableHeight / maxPlayersInColumn) - requiredSeat, 26, maxAvatarSize);
+    const sharedSeatHeight = sharedAvatarSize + requiredSeat;
+    const topOffset = Math.max(18, (availableHeight - (Math.max(leftColumnSeats, rightColumnSeats) * sharedSeatHeight)) / 2 + 18);
+    const columnWidth = Math.max(72, sharedAvatarSize + 18);
+
+    const leftLayout = { avatarSize: sharedAvatarSize, seatHeight: sharedSeatHeight, topOffset, wrapWidth: columnWidth };
+    const rightLayout = { avatarSize: sharedAvatarSize, seatHeight: sharedSeatHeight, topOffset, wrapWidth: columnWidth };
 
     for (let i = 0; i < totalSeats; i++) {
       const side = i < leftColumnSeats ? 0 : 1;
       const row = side === 0 ? i : i - leftColumnSeats;
+      const columnConfig = side === 0 ? leftLayout : rightLayout;
       const wrap = document.createElement('div');
       wrap.className = 'seat-wrap';
-      wrap.style.left = `${side === 0 ? 4 : container.clientWidth - 76}px`;
-      wrap.style.top = `${startY + row * (seatSize + 18 + rowGap)}px`;
+      wrap.style.position = 'absolute';
+      wrap.style.left = `${side === 0 ? 12 : Math.max(12, container.clientWidth - columnConfig.wrapWidth - 12)}px`;
+      wrap.style.top = `${columnConfig.topOffset + row * columnConfig.seatHeight}px`;
+      wrap.style.width = `${columnConfig.wrapWidth}px`;
+      wrap.style.height = `${columnConfig.seatHeight}px`;
+      wrap.style.transform = 'none';
 
       const seatEl = document.createElement('div');
       seatEl.className = 'seat';
       seatEl.id = `seat-${i}`;
       seatEl.style.top = '0px';
+      seatEl.style.left = '0px';
+      seatEl.style.width = `${columnConfig.avatarSize}px`;
+      seatEl.style.height = `${columnConfig.avatarSize}px`;
       const numberEl = document.createElement('div');
       numberEl.className = 'seat-number';
       numberEl.textContent = String(i + 1);
@@ -162,9 +258,10 @@
         if (userIdInSeat === currentSpeakerId) seatEl.classList.add('active-speaker');
 
         if (user && user.photoUrl) {
-          seatEl.innerHTML = `<img src="${user.photoUrl}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`;
+          seatEl.innerHTML = `<img src="${user.photoUrl}" style="width:100%; height:100%; border-radius:50%; object-fit:cover; display:block;">`;
         } else {
-          seatEl.innerHTML = `<div style="overflow:hidden; text-overflow:ellipsis; width:100%; font-size:11px;"><b>${user ? user.username[0] : ''}</b></div>`;
+          seatEl.innerHTML = '';
+          seatEl.textContent = '';
         }
 
         if (gameStatus === 'waiting' && userIdInSeat === myId && user && user.isReady) {
@@ -204,9 +301,14 @@
               cop_check: 'проверить'
             };
             const targetName = user ? user.username : 'этого игрока';
-            if (!window.confirm(`${actionNames[actionType]} игрока «${targetName}»?`)) return;
-            nightActionSubmitted = true;
-            window.appSocket.socket.emit('night-action', { roomId: currentRoomId, targetId: userIdInSeat, actionType });
+            renderActionConfirm({
+              title: 'Подтверждение действия',
+              message: `${actionNames[actionType]} игрока «${targetName}»?`,
+              onConfirm: () => {
+                nightActionSubmitted = true;
+                window.appSocket.socket.emit('night-action', { roomId: currentRoomId, targetId: userIdInSeat, actionType });
+              }
+            });
           };
         } else {
           // default click: take seat when empty; occupied seats do nothing outside night
@@ -217,14 +319,17 @@
           const myVote = window.__lastRoomState.votes[myId];
           if (myVote === userIdInSeat) {
             seatEl.classList.add('selected-vote');
-            seatEl.insertAdjacentHTML('beforeend', '<div class="seat-vote-check">✓</div>');
+            if (!seatEl.querySelector('.seat-vote-check')) {
+              seatEl.insertAdjacentHTML('beforeend', '<div class="seat-vote-check">✓</div>');
+            }
           }
         }
 
-        // show if this seat is the one we selected this night
+        // show selected night target with a gold check, without extra marker icons
         if (window.myNightTargetId && window.myNightTargetId === userIdInSeat) {
-          if (!seatEl.querySelector('.target-marker')) {
-            const m = document.createElement('div'); m.className = 'target-marker'; m.style.position='absolute'; m.style.bottom='-6px'; m.style.left='50%'; m.style.transform='translateX(-50%)'; m.style.fontSize='10px'; m.innerText = '🎯 ВЫ'; seatEl.appendChild(m);
+          seatEl.classList.add('selected-target');
+          if (!seatEl.querySelector('.seat-target-check')) {
+            seatEl.insertAdjacentHTML('beforeend', '<div class="seat-target-check">✓</div>');
           }
         }
 
@@ -241,6 +346,26 @@
       wrap.appendChild(nameEl);
       container.appendChild(wrap);
     }
+  }
+
+  function getHiddenMediaHost() {
+    let host = document.getElementById('audio-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'audio-host';
+      host.setAttribute('aria-hidden', 'true');
+      host.style.position = 'fixed';
+      host.style.left = '-9999px';
+      host.style.top = '-9999px';
+      host.style.width = '1px';
+      host.style.height = '1px';
+      host.style.overflow = 'hidden';
+      host.style.opacity = '0';
+      host.style.pointerEvents = 'none';
+      host.style.display = 'none';
+      document.body.appendChild(host);
+    }
+    return host;
   }
 
   function updateUI(users, seats, gameStatus) {
@@ -327,7 +452,19 @@
     closeRoomMenu();
   }
   function toggleReady() { appSocket.setReady(); }
-  function sendChatMessage() { const input = chatInput; if (!input) return; const text = input.value.trim(); if (text.length > 0) { appSocket.sendChatMessage(text); input.value = ''; } }
+  function sendChatMessage() {
+    const input = chatInput;
+    if (!input) return;
+    if (!getChatAllowed()) {
+      input.value = '';
+      return;
+    }
+    const text = input.value.trim();
+    if (text.length > 0) {
+      appSocket.sendChatMessage(text);
+      input.value = '';
+    }
+  }
 
   function updateMicButtonUI(isOn) { if (!micBtn) return; if (isOn) { micBtn.classList.add('active'); micBtn.innerText = '🎤 Мик: Вкл'; } else { micBtn.classList.remove('active'); micBtn.innerText = '🎤 Мик: Выкл'; } }
 
@@ -523,6 +660,8 @@
     closeModal();
     if (lobby) lobby.classList.add('hidden');
     if (roomSection) roomSection.classList.remove('hidden');
+    const chatContainer = document.getElementById('chat-container');
+    if (chatContainer) chatContainer.classList.add('hidden');
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
     if (roomCodeDisplay) roomCodeDisplay.innerText = roomId;
 
@@ -545,9 +684,23 @@
       const lkRoom = new Room();
       window.lkRoom = lkRoom;
 
+      const mediaHost = getHiddenMediaHost();
+
       lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
         if (track.kind === 'audio') {
-          const element = track.attach(); element.muted = !isAudioOn; element.dataset.participantId = participant.identity; document.body.appendChild(element);
+          const element = track.attach();
+          element.muted = !isAudioOn;
+          element.dataset.participantId = participant.identity;
+          element.setAttribute('aria-hidden', 'true');
+          element.style.position = 'fixed';
+          element.style.left = '-9999px';
+          element.style.top = '-9999px';
+          element.style.width = '1px';
+          element.style.height = '1px';
+          element.style.opacity = '0';
+          element.style.pointerEvents = 'none';
+          element.style.display = 'none';
+          mediaHost.appendChild(element);
         }
       });
 
@@ -563,15 +716,25 @@
 
   appEvents.on('update-room', ({ roomName, maxSeats, hasChat, users, seats, gameStatus, currentSpeakerId, votes, lastWordPlayerId, doctorSelfHealUsedLastNight }) => {
     if (roomTitleDisplay) roomTitleDisplay.innerText = roomName;
-    const chatContainer = document.querySelector('.chat-container'); if (chatContainer && hasChat === false) chatContainer.classList.add('hidden');
+    const chatContainer = document.querySelector('.chat-container');
+    if (chatContainer && hasChat === false) chatContainer.classList.add('hidden');
+    const myState = users && myId ? users[myId] : null;
+
+    if (gameStatus !== 'day_voting') hasVotedThisPhase = false;
+    if (gameStatus === 'day_voting' && votes && Object.prototype.hasOwnProperty.call(votes, myId)) hasVotedThisPhase = true;
+
+    if (chatInput) chatInput.disabled = !getChatAllowed();
+    if (chatSendBtn) chatSendBtn.disabled = !getChatAllowed();
 
     // keep last room state for helpers
     window.__lastRoomState = { users, seats, gameStatus, votes: votes || {}, lastWordPlayerId, doctorSelfHealUsedLastNight };
-    if (gameStatus !== 'day_voting') hasVotedThisPhase = false;
-    if (gameStatus === 'day_voting' && votes && Object.prototype.hasOwnProperty.call(votes, myId)) hasVotedThisPhase = true;
     renderSeats(maxSeats, users, seats, currentSpeakerId, gameStatus);
     updateUI(users, seats, gameStatus);
     renderVoting(votes || {}, users || {}, seats || {}, gameStatus === 'day_voting');
+
+    if (gameStatus === 'night' && myState && !myState.isAlive) {
+      clearPhaseUI();
+    }
 
   // Ensure local microphone follows server-authoritative state (do NOT emit toggle to server here)
   try {
@@ -588,11 +751,14 @@
 
   appEvents.on('voting-started', ({ timeLeft }) => {
     hasVotedThisPhase = false;
-    document.getElementById('voting-paper')?.classList.remove('hidden');
+    const votingPaper = document.getElementById('voting-paper');
+    if (votingPaper) votingPaper.classList.remove('hidden');
+    const eventFeed = document.getElementById('event-feed');
+    if (eventFeed) eventFeed.classList.remove('hidden');
     const statusEl = document.getElementById('game-status-text');
-    if (statusEl) statusEl.innerText = '🗳️ Голосование. Выберите игрока за столом.';
+    if (statusEl) statusEl.innerText = 'ГОЛОСОВАНИЕ\nВЫБЕРИТЕ ИГРОКА';
     const timerEl = document.getElementById('game-timer-text');
-    if (timerEl) timerEl.innerText = `Голосование. Осталось: ${timeLeft}с`;
+    if (timerEl) timerEl.innerText = `Осталось: ${timeLeft}с`;
     if (micBtn) micBtn.disabled = true;
   });
 
@@ -621,12 +787,16 @@
     const statusEl = document.getElementById('game-status-text');
     if (!statusEl) return;
     if (winner) {
-      statusEl.innerText = winner === 'mafia' ? '🏁 Победил клан мафии.' : '🏁 Победил клан мирных.';
+      statusEl.innerText = winner === 'mafia' ? 'ИГРА ЗАВЕРШЕНА\nМАФИЯ ПОБЕДИЛА' : 'ИГРА ЗАВЕРШЕНА\nМИРНЫЕ ПОБЕДИЛИ';
+      addEventFeedItem(winner === 'mafia' ? 'Игра завершена. Победила мафия.' : 'Игра завершена. Победили мирные.', 'alert');
     } else if (tie || !eliminatedPlayerName) {
-      statusEl.innerText = '⚖️ Голоса разделились. Никто не покинул игру.';
+      statusEl.innerText = 'ГОЛОСА РАЗДЕЛИЛИСЬ\nНИКТО НЕ ВЫБЫЛ';
+      addEventFeedItem('Голоса разделились. Никто не покинул игру.', 'info');
     } else {
-      statusEl.innerText = `⚖️ Игрок ${eliminatedPlayerName} исключён.`;
+      statusEl.innerText = `ИСКЛЮЧЁН\n${eliminatedPlayerName}`;
+      addEventFeedItem(`Игрок ${eliminatedPlayerName} исключён.`, 'alert');
     }
+    setTimeout(() => clearPhaseUI(), 1800);
   });
 
   // acknowledge of night action from server (private)
@@ -634,23 +804,26 @@
     console.log('night-action-ack', { actionType, targetId, accepted });
     if (accepted) {
       window.myNightTargetId = targetId;
-      // immediate visual feedback: add marker to seat if present
       const idx = getSeatIndexByUserId(targetId);
       if (idx !== -1) {
         const targetEl = document.getElementById(`seat-${idx}`);
         if (targetEl) {
-          const existing = targetEl.querySelector('.target-marker');
-          if (!existing) {
-            const m = document.createElement('div'); m.className = 'target-marker'; m.style.position='absolute'; m.style.bottom='-6px'; m.style.left='50%'; m.style.transform='translateX(-50%)'; m.style.fontSize='10px'; m.innerText = '🎯 ВЫ'; targetEl.appendChild(m);
+          targetEl.classList.add('selected-target');
+          if (!targetEl.querySelector('.seat-target-check')) {
+            targetEl.insertAdjacentHTML('beforeend', '<div class="seat-target-check">✓</div>');
           }
         }
-        const targetName = getUserNameById(targetId);
-        if (actionType === 'mafia_kill') alert(`Вы стреляли в игрока «${targetName}».`);
-        if (actionType === 'doctor_heal') alert(`Вы лечили игрока «${targetName}».`);
       }
+      const targetName = getUserNameById(targetId);
+      const actionLabels = {
+        mafia_kill: `Вы выбрали игрока «${targetName}»`,
+        doctor_heal: `Вы выбрали игрока «${targetName}»`,
+        cop_check: `Вы проверили игрока «${targetName}»`
+      };
+      addEventFeedItem(actionLabels[actionType] || 'Действие подтверждено.', 'success');
     } else {
       nightActionSubmitted = false;
-      alert('Действие не принято: этой ночью вы уже действовали или действие недоступно.');
+      addEventFeedItem('Действие не принято: вы уже действовали или цель недоступна.', 'alert');
     }
   });
 
@@ -670,33 +843,33 @@
       updateRoleCard();
       // Show role image card for 2 seconds immediately after role distribution
       try { showRoleCardImage(role); } catch (e) { console.warn('showRoleCardImage failed', e); }
-      if (statusEl) statusEl.innerText = `🎮 Игра началась — ваша роль: ${role}. Сейчас ночь.`;
+      if (statusEl) statusEl.innerText = `НОЧЬ 1\nНОЧНЫЕ ДЕЙСТВИЯ`;
     } else if (data && data.roomStatus) {
-      if (statusEl) statusEl.innerText = '🎮 Игра началась! Идет фаза личных высказываний.';
+      if (statusEl) statusEl.innerText = 'НОЧЬ 1\nНОЧНЫЕ ДЕЙСТВИЯ';
     } else {
-      if (statusEl) statusEl.innerText = '🎮 Игра началась!';
+      if (statusEl) statusEl.innerText = 'ИГРА НАЧАЛАСЬ';
     }
   });
 
   appEvents.on('turn-changed', ({ activePlayerId, timeLeft }) => {
     window.currentActiveSpeakerId = activePlayerId;
-    const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `Ход игрока. Осталось: ${timeLeft}с`;
+    const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `Осталось: ${timeLeft}с`;
 
     const isMeActive = (window.appSocket.socket.id === activePlayerId);
-    if (isMeActive) { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerHTML = "🎯 <span style='color: #00e676;'>ВАШ ХОД! Вы можете говорить.</span>"; if (micBtn) micBtn.disabled = false; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && !window.hasTurnMicStarted) { window.hasTurnMicStarted = true; window.lkRoom.localParticipant.setMicrophoneEnabled(true).then(() => { updateMicButtonUI(true); appSocket.toggleMedia(true); }).catch(e => console.error(e)); } }
-    else { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '⏳ Очередь другого игрока.'; if (micBtn) micBtn.disabled = true; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && window.lkRoom.localParticipant.isMicrophoneEnabled) { window.lkRoom.localParticipant.setMicrophoneEnabled(false).then(() => { updateMicButtonUI(false); appSocket.toggleMedia(false); }).catch(e => console.error(e)); } }
+    if (isMeActive) { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = 'ВАШ ХОД\nГОВОРИТЕ'; if (micBtn) micBtn.disabled = false; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && !window.hasTurnMicStarted) { window.hasTurnMicStarted = true; window.lkRoom.localParticipant.setMicrophoneEnabled(true).then(() => { updateMicButtonUI(true); appSocket.toggleMedia(true); }).catch(e => console.error(e)); } }
+    else { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = 'ХОД ДРУГОГО ИГРОКА'; if (micBtn) micBtn.disabled = true; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && window.lkRoom.localParticipant.isMicrophoneEnabled) { window.lkRoom.localParticipant.setMicrophoneEnabled(false).then(() => { updateMicButtonUI(false); appSocket.toggleMedia(false); }).catch(e => console.error(e)); } }
   });
 
   appEvents.on('timer-tick', ({ timeLeft }) => { const timerEl = document.getElementById('game-timer-text'); if (!timerEl) return; if (timerEl.innerText.includes('Обсуждение')) timerEl.innerText = `💬 Общее обсуждение. Осталось: ${timeLeft}с`; else timerEl.innerText = `⏱ Осталось времени: ${timeLeft}с`; });
 
-  appEvents.on('discussion-started', ({ timeLeft }) => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerHTML = "💬 <span style='color: #00bcd4;'>ФАЗА ОБЩЕГО ОБСУЖДЕНИЯ! Микрофоны доступны.</span>"; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `💬 Общее обсуждение. Осталось: ${timeLeft}с`; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && !window.lkRoom.localParticipant.isMicrophoneEnabled) { window.lkRoom.localParticipant.setMicrophoneEnabled(true).then(() => { updateMicButtonUI(true); appSocket.toggleMedia(true); }).catch(e => console.error(e)); } });
+  appEvents.on('discussion-started', ({ timeLeft }) => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = 'ДЕНЬ 1\nОБЩЕЕ ОБСУЖДЕНИЕ'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `Осталось: ${timeLeft}с`; if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && !window.lkRoom.localParticipant.isMicrophoneEnabled) { window.lkRoom.localParticipant.setMicrophoneEnabled(true).then(() => { updateMicButtonUI(true); appSocket.toggleMedia(true); }).catch(e => console.error(e)); } });
 
   appEvents.on('last-word-started', ({ playerId, playerName, timeLeft }) => {
     const isSpeaker = window.appSocket.socket.id === playerId;
     const statusEl = document.getElementById('game-status-text');
     const timerEl = document.getElementById('game-timer-text');
-    if (statusEl) statusEl.innerText = isSpeaker ? '🗣️ Ваше последнее слово.' : `🗣️ Последнее слово игрока «${playerName}».`;
-    if (timerEl) timerEl.innerText = `Последнее слово. Осталось: ${timeLeft}с`;
+    if (statusEl) statusEl.innerText = isSpeaker ? 'ПОСЛЕДНЕЕ СЛОВО\nВАШ ХОД' : `ПОСЛЕДНЕЕ СЛОВО\n${playerName}`;
+    if (timerEl) timerEl.innerText = `Осталось: ${timeLeft}с`;
     if (micBtn) micBtn.disabled = !isSpeaker;
   });
 
@@ -705,8 +878,8 @@
     // reset local night selection
     window.myNightTargetId = null;
 
-    const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerHTML = "🌃 <span style='color: #607d8b;'>Ночь. Все микрофоны выключены.</span>";
-    const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `🌃 Ночь. Осталось: ${timeLeft}с`;
+    const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = 'НОЧЬ 1\nНОЧНЫЕ ДЕЙСТВИЯ';
+    const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = `Осталось: ${timeLeft}с`;
     // выключаем локальный микрофон
     if (mySeat !== null && window.lkRoom && window.lkRoom.localParticipant && window.lkRoom.localParticipant.isMicrophoneEnabled) {
       window.lkRoom.localParticipant.setMicrophoneEnabled(false).then(() => { updateMicButtonUI(false); appSocket.toggleMedia(false); }).catch(e => console.error(e));
@@ -717,22 +890,25 @@
   appEvents.on('night-result', ({ killedPlayerName, winner }) => {
     const statusEl = document.getElementById('game-status-text');
     if (winner) {
-      if (statusEl) statusEl.innerText = winner === 'mafia' ? '🏁 Победил клан мафии.' : '🏁 Победил клан мирных.';
+      if (statusEl) statusEl.innerText = winner === 'mafia' ? 'ИГРА ЗАВЕРШЕНА\nМАФИЯ ПОБЕДИЛА' : 'ИГРА ЗАВЕРШЕНА\nМИРНЫЕ ПОБЕДИЛИ';
+      addEventFeedItem(winner === 'mafia' ? 'Игра завершена. Победила мафия.' : 'Игра завершена. Победили мирные.', 'alert');
     } else if (killedPlayerName) {
-      alert(`Этой ночью был убит: ${killedPlayerName}`);
-      if (statusEl) statusEl.innerText = `🔪 Ночь завершена. Погиб: ${killedPlayerName}`;
+      if (statusEl) statusEl.innerText = `НОЧЬ ЗАВЕРШЕНА\nПОГИБ ${killedPlayerName}`;
+      addEventFeedItem(`Ночь завершена. Погиб: ${killedPlayerName}`, 'alert');
     } else {
-      alert('Прошла спокойная ночь');
-      if (statusEl) statusEl.innerText = '🌙 Ночь прошла спокойно.';
+      if (statusEl) statusEl.innerText = 'НОЧЬ ПРОШЛА СПОКОЙНО';
+      addEventFeedItem('Ночь прошла спокойно.', 'success');
     }
+    setTimeout(() => clearPhaseUI(), 2200);
   });
 
   // Результат проверки комиссара (личное сообщение)
   appEvents.on('cop-result', ({ targetName, isMafia }) => {
-    alert(`Игрок «${targetName || ''}» из клана ${isMafia ? 'мафии' : 'мирных'}.`);
+    addEventFeedItem(`Игрок «${targetName || ''}» из клана ${isMafia ? 'мафии' : 'мирных'}.`, 'success');
   });
 
-  appEvents.on('game-ended', () => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = '🏁 Игра окончена. Можете общаться или начать новую.'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = 'Игра завершена'; if (mySeat !== null && readyBtn) { readyBtn.style.display = 'inline-block'; readyBtn.innerText = 'Готов к игре'; readyBtn.classList.remove('ready-on'); }
+  appEvents.on('game-ended', () => { const statusEl = document.getElementById('game-status-text'); if (statusEl) statusEl.innerText = 'ИГРА ЗАВЕРШЕНА\nМОЖНО ОБЩАТЬСЯ'; const timerEl = document.getElementById('game-timer-text'); if (timerEl) timerEl.innerText = 'Конец игры'; if (mySeat !== null && readyBtn) { readyBtn.style.display = 'inline-block'; readyBtn.innerText = 'Готов к игре'; readyBtn.classList.remove('ready-on'); }
+    clearPhaseUI();
     // clear private role after game
     window.myRole = null; myRole = null; updateRoleCard(); const playerRoleEl = document.getElementById('player-role'); if (playerRoleEl) playerRoleEl.innerText = 'Вы - —';
   });

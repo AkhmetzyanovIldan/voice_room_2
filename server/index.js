@@ -238,9 +238,18 @@ io.on('connection', (socket) => {
   socket.on('send-chat-message', (text) => {
     const roomId = socket.data.roomId;
     if (!roomId || !rooms[roomId]) return;
+    const room = rooms[roomId];
+    const user = room && room.users[socket.id];
+    if (!user || !room) return;
+
+    if (room.gameStatus !== 'waiting' && user.seat !== null) return;
+    if (room.gameStatus === 'day_voting' || room.gameStatus === 'night') return;
+
+    const message = String(text || '').trim();
+    if (!message) return;
     io.to(roomId).emit('chat-message', {
       username: socket.data.username,
-      text: text.trim(),
+      text: message,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     });
   });

@@ -102,6 +102,10 @@
 
         <main class="room-main-area">
             <div class="table-container" id="table-container"></div>
+            <div id="event-feed" class="event-feed hidden" aria-live="polite">
+                <div class="event-feed-header">События</div>
+                <div id="event-feed-list" class="event-feed-list"></div>
+            </div>
             <div id="voting-paper" class="voting-paper hidden">
                 <div class="voting-title">Голосование</div>
                 <div id="vote-results-list"></div>
@@ -120,6 +124,17 @@
             <div class="chat-head">ЧАТ КОМНАТЫ <button id="chat-close-btn" type="button">×</button></div>
             <div class="chat-messages" id="chat-messages"></div>
             <div class="chat-input-area"><input type="text" id="chat-input" placeholder="Сообщение..." maxlength="150"><button type="button" id="chat-send-btn">➤</button></div>
+        </div>
+    </div>
+
+    <div id="action-confirm-modal" class="room-modal hidden">
+        <div class="action-confirm-card">
+            <h2>Подтверждение действия</h2>
+            <p id="action-confirm-text">Вы уверены?</p>
+            <div class="action-confirm-actions">
+                <button id="action-confirm-yes" class="menu-action" type="button">Подтвердить</button>
+                <button id="action-confirm-no" class="menu-action secondary" type="button">Отмена</button>
+            </div>
         </div>
     </div>
 
