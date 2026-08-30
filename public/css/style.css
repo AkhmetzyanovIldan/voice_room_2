@@ -15,7 +15,7 @@ body {
 
 #lobby, #room {
   width: 100%;
-  height: calc(var(--vh, 1vh) * 100);
+  height: var(--app-viewport-height, calc(var(--vh, 1vh) * 100));
 }
 
 /* Лобби */
@@ -163,7 +163,7 @@ input[type="text"] {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 12px;
+  padding: calc(var(--tg-safe-top, 0px) + 12px) 12px 12px;
 }
 #room::before {
   content: '';
