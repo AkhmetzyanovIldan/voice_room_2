@@ -1,634 +1,252 @@
 const express = require('express');
-const http = require('http');
+const http = require('node:http');
+const path = require('node:path');
+const { randomBytes, randomUUID } = require('node:crypto');
 const { Server } = require('socket.io');
-const path = require('path');
-const { AccessToken } = require('livekit-server-sdk');
-
 const config = require('./config');
-const { normalizeEnabledRoles, getVotePower, getClan } = require('./roles');
+const { GameEngine, GameError } = require('./engine');
+const { evaluateVictory } = require('./roles');
+const { createMedia } = require('./media');
+const { telegramProfile, profile } = require('./auth');
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-// serve static files from root/public
-app.use(express.static(path.join(__dirname, '..', 'public')));
-
-// In-memory rooms store (legacy behavior)
-const rooms = {};
-
-function generateRoomCode() {
-  return Math.floor(1000 + Math.random() * 9000).toString();
-}
-
-io.on('connection', (socket) => {
-  console.log('socket connected', socket.id);
-
-  socket.on('get-livekit-token', async ({ username, roomId }) => {
-    const identity = `${username}_${socket.id}`;
-    const at = new AccessToken(config.LK_API_KEY, config.LK_API_SECRET, { identity });
-    at.addGrant({ roomJoin: true, room: roomId, canPublish: true, canSubscribe: true });
-    const token = await at.toJwt();
-    // отправляем токен и URL LiveKit-кластера клиенту
-    socket.emit('livekit-token', { token, url: config.LIVEKIT_URL });
+function createApplication(options = {}) {
+  const settings = { ...config, ...options.config };
+  const app = express();
+  app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
   });
-
-  socket.on('create-room', ({ roomName, username, photoUrl, maxSeats, hasChat, enabledRoles }) => {
-    let roomId = generateRoomCode();
-    while (rooms[roomId]) { roomId = generateRoomCode(); }
-
-    const seats = {};
-    const max = parseInt(maxSeats) || 6;
-    for (let i = 0; i < max; i++) seats[i] = null;
-
-    rooms[roomId] = {
-      name: roomName || 'Комната',
-      maxSeats: max,
-      hasChat: hasChat !== undefined ? hasChat : true,
-      enabledRoles: normalizeEnabledRoles(enabledRoles),
-      users: {},
-      seats: seats,
-      gameStatus: 'waiting',
-      currentTurnIndex: 0,
-      turnOrder: [],
-      timer: null,
-      // Mafia game state (initialized for game usage)
-      nightActions: { mafiaTarget: null, doctorTarget: null, copTarget: null },
-      doctorSelfHealUsedLastNight: false
-      ,
-      votes: {},
-      nightActionActors: {},
-      lastWordPlayerId: null
-    };
-
-    joinRoomLogic(socket, roomId, username, photoUrl);
+  app.get('/health', (req, res) => res.json({ ok: true }));
+  app.get('/vendor/livekit-client.js', (req, res) =>
+    res.sendFile(require.resolve('livekit-client'))
+  );
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+  const server = http.createServer(app),
+    io = new Server(server, { maxHttpBufferSize: 32000 });
+  const sessions = new Map(),
+    clients = new Map();
+  let closing = false;
+  const personal = (id, event, data) => clients.get(id)?.emit(event, data);
+  let media;
+  const engine = new GameEngine({
+    broadcast: (id, event, data) => io.to(id).emit(event, data),
+    personal,
+    victory: evaluateVictory,
+    mediaChanged: (room) => media?.sync(room),
+    ...options.engine,
   });
-
-  socket.on('join-room', ({ roomId, username, photoUrl }) => {
-    if (!rooms[roomId]) {
-      socket.emit('error-msg', 'Комната не найдена!');
-      return;
+  media =
+    options.media ||
+    createMedia(settings, engine, (id) =>
+      personal(id, 'media-error', 'Голосовая связь отключена. Подключите звук повторно.')
+    );
+  io.use((socket, next) => {
+    try {
+      const auth = socket.handshake.auth || {};
+      let verified = null;
+      if (auth.initData && settings.BOT_TOKEN)
+        verified = telegramProfile(auth.initData, settings.BOT_TOKEN);
+      else if (settings.REQUIRE_TELEGRAM) throw new Error('Откройте игру через Telegram');
+      const previous =
+        (typeof auth.sessionToken === 'string' ? sessions.get(auth.sessionToken) : null) ||
+        (verified
+          ? [...sessions.values()].find((s) => s.telegramId === verified.telegramId)
+          : null);
+      if (previous?.telegramId && previous.telegramId !== verified?.telegramId)
+        throw new Error('Сессия принадлежит другому пользователю');
+      const s = previous || {
+        id: randomUUID(),
+        token: randomBytes(32).toString('hex'),
+        roomId: null,
+      };
+      if (verified)
+        Object.assign(s, { telegramId: verified.telegramId, profile: profile(verified) });
+      s.lastSeen = Date.now();
+      sessions.set(s.token, s);
+      socket.data.session = s;
+      next();
+    } catch (e) {
+      next(new Error(e.message));
     }
-    joinRoomLogic(socket, roomId, username, photoUrl);
   });
-
-  function joinRoomLogic(socket, roomId, username, photoUrl) {
-    socket.join(roomId);
-    socket.data.roomId = roomId;
-    socket.data.username = username || 'Гость';
-    socket.data.photoUrl = photoUrl || '';
-
-    const room = rooms[roomId];
-    room.users[socket.id] = {
-      id: socket.id,
-      username: socket.data.username,
-      photoUrl: socket.data.photoUrl,
-      seat: null,
-      mic: false,
-      isReady: false
-    };
-
-    socket.emit('room-joined', { roomId, roomName: room.name });
-    emitRoomUpdate(roomId);
+  function current(socket) {
+    const s = socket.data.session,
+      room = engine.room(s.roomId);
+    if (!room.users[s.id]) throw new GameError('Войдите в комнату заново');
+    return room;
   }
-
-  socket.on('take-seat', (seatIndex) => {
-    const roomId = socket.data.roomId;
-    if (!roomId || !rooms[roomId]) return;
-    const room = rooms[roomId];
-    if (room.gameStatus !== 'waiting') return;
-
-    if (room.seats[seatIndex] === null) {
-      for (let i = 0; i < room.maxSeats; i++) if (room.seats[i] === socket.id) room.seats[i] = null;
-      room.seats[seatIndex] = socket.id;
-      room.users[socket.id].seat = seatIndex;
-      room.users[socket.id].mic = true;
-      emitRoomUpdate(roomId);
+  function sync(socket, room, resumed = false) {
+    const id = socket.data.session.id;
+    socket.emit('room-joined', { roomId: room.id, roomName: room.name, playerId: id, resumed });
+    socket.emit('private-state', engine.privateState(room, id));
+    engine.update(room);
+  }
+  async function leave(socket) {
+    const s = socket.data.session,
+      room = engine.rooms.get(s.roomId);
+    s.roomId = null;
+    if (!room) return;
+    socket.leave(room.id);
+    clearTimeout(room.users[s.id]?.disconnectTimer);
+    engine.remove(room, s.id);
+    await media.remove(room, s.id);
+  }
+  io.on('connection', (socket) => {
+    const s = socket.data.session,
+      id = s.id,
+      old = clients.get(id);
+    clients.set(id, socket);
+    if (old && old !== socket) {
+      old.emit('session-replaced');
+      old.disconnect(true);
     }
-  });
-
-  socket.on('leave-seat', () => {
-    const roomId = socket.data.roomId;
-    if (!roomId || !rooms[roomId]) return;
-    const room = rooms[roomId];
-    if (room.gameStatus !== 'waiting') return;
-
-    for (let i = 0; i < room.maxSeats; i++) if (room.seats[i] === socket.id) room.seats[i] = null;
-    if (room.users[socket.id]) {
-      room.users[socket.id].seat = null;
-      room.users[socket.id].mic = false;
-      room.users[socket.id].isReady = false;
-    }
-    emitRoomUpdate(roomId);
-  });
-
-  socket.on('set-ready', () => {
-    const roomId = socket.data.roomId;
-    if (!roomId || !rooms[roomId]) return;
-    const room = rooms[roomId];
-    if (room.gameStatus !== 'waiting') return;
-    const user = room.users[socket.id];
-    if (user && user.seat !== null) {
-      user.isReady = !user.isReady;
-      emitRoomUpdate(roomId);
-      const seatedUsers = Object.values(room.users).filter(u => u.seat !== null);
-      if (seatedUsers.length > 0 && seatedUsers.every(u => u.isReady)) {
-        startPlayingPhase(roomId);
-      }
-    }
-  });
-
-  socket.on('toggle-media', ({ mic }) => {
-    const roomId = socket.data.roomId;
-    if (!roomId || !rooms[roomId]) return;
-    const room = rooms[roomId];
-    const user = room.users[socket.id];
-    // Только сидящие за столом могут переключать микрофон (наблюдатели — нет)
-    if (!user || user.seat === null) return;
-
-    // Правила:
-    // - В фазе 'day_speeches' менять состояние микрофона может только текущий активный игрок.
-    // - В фазе 'day_discussion' или 'waiting' — любой сидящий может менять свой микрофон.
-    // - В фазе 'night' — никто не может включать микрофон (тихая ночь).
-    if (room.gameStatus === 'day_speeches') {
-      const activePlayer = room.turnOrder && room.turnOrder[room.currentTurnIndex];
-      if (!activePlayer) return;
-      if (activePlayer.id !== socket.id) {
-        // Игрок неактивен — отклоняем запрос
-        return;
-      }
-    } else if (room.gameStatus === 'last_words') {
-      if (room.lastWordPlayerId !== socket.id) return;
-    } else if (room.gameStatus === 'day_discussion' || room.gameStatus === 'waiting') {
-      // разрешено
+    socket.emit('session', { sessionToken: s.token, playerId: id });
+    const restored = engine.rooms.get(s.roomId);
+    if (restored?.users[id]) {
+      clearTimeout(restored.users[id].disconnectTimer);
+      engine.join(restored, id, {});
+      socket.join(restored.id);
+      sync(socket, restored, true);
     } else {
-      // ночь или неизвестное состояние — запрещаем переключать микрофон
-      return;
+      s.roomId = null;
+      socket.emit('room-left');
     }
-
-    // Если дошли сюда — разрешаем переключить микрофон для запрашивающего пользователя
-    user.mic = mic;
-    emitRoomUpdate(roomId);
-  });
-
-  // Ночные действия (мафия, врач, комиссар)
-  socket.on('night-action', ({ roomId, targetId, actionType }) => {
-    const room = rooms[roomId];
-    if (!room || room.gameStatus !== 'night') return;
-
-    const actor = room.users[socket.id];
-    if (!actor || !actor.isAlive) return; // только живые игроки действуют
-
-    const target = room.users[targetId];
-    if (!target) return;
-
-    // actionType может быть: 'mafia_kill', 'doctor_heal', 'cop_check'
-    // Проверяем, что отправитель имеет право совершать действие этой роли
-    let accepted = false;
-    if (room.nightActionActors[socket.id]) {
-      socket.emit('night-action-ack', { actionType, targetId, accepted: false, reason: 'already-acted' });
-      return;
+    let bucket = Date.now(),
+      count = 0;
+    function on(name, fn, ack) {
+      socket.on(name, async (payload) => {
+        try {
+          if (clients.get(id) !== socket) return;
+          if (Date.now() - bucket > 1000) {
+            bucket = Date.now();
+            count = 0;
+          }
+          if (++count > 30) throw new GameError('Слишком много действий, подождите секунду');
+          if (payload === null) throw new GameError('Некорректный запрос');
+          s.lastSeen = Date.now();
+          await fn(payload);
+        } catch (e) {
+          const message = e instanceof GameError ? e.message : 'Не удалось выполнить действие';
+          if (ack) socket.emit(ack, { accepted: false, reason: message });
+          socket.emit('error-msg', message);
+          if (!(e instanceof GameError)) console.error(`Event ${name}: ${e.name}`);
+        }
+      });
     }
-    if (actionType === 'mafia_kill') {
-      if (actor.role === 'mafia') { room.nightActions.mafiaTarget = targetId; accepted = true; }
+    function join(room, payload) {
+      socket.join(room.id);
+      s.roomId = room.id;
+      engine.join(room, id, s.profile || profile(payload));
+      sync(socket, room);
     }
-    if (actionType === 'doctor_heal') {
-      if (actor.role === 'doctor' &&
-        (targetId !== socket.id || !room.doctorSelfHealUsedLastNight)) {
-        room.nightActions.doctorTarget = targetId; accepted = true;
-      }
-    }
-    if (actionType === 'cop_check') {
-      if (actor.role === 'cop') {
-        room.nightActions.copTarget = targetId;
-        accepted = true;
-      }
-    }
-
-    if (accepted) {
-      room.nightActionActors[socket.id] = true;
-      if (actionType === 'cop_check') {
-        socket.emit('cop-result', { targetName: target.username, isMafia: target.role === 'mafia' });
-      }
-    }
-    console.log(`night-action from ${socket.id} (${actor && actor.role}) action=${actionType} target=${targetId} accepted=${accepted}`);
-
-    // send ack only to the actor (private)
-    socket.emit('night-action-ack', { actionType, targetId, accepted });
-  });
-
-  socket.on('day-vote', ({ targetId }) => {
-    const roomId = socket.data.roomId;
-    const room = rooms[roomId];
-    const voter = room && room.users[socket.id];
-    const target = room && room.users[targetId];
-    if (!room || room.gameStatus !== 'day_voting' || !voter || !voter.isAlive || voter.seat === null ||
-        !target || !target.isAlive || target.seat === null) return;
-    if (Object.prototype.hasOwnProperty.call(room.votes, socket.id)) {
-      socket.emit('day-vote-ack', { accepted: false, reason: 'already-voted' });
-      return;
-    }
-    room.votes[socket.id] = targetId;
-    socket.emit('day-vote-ack', { targetId, accepted: true });
-    emitRoomUpdate(roomId);
-    const alive = Object.values(room.users).filter(u => u.seat !== null && u.isAlive);
-    if (alive.every(u => room.votes[u.id])) resolveDayVote(roomId);
-  });
-
-  socket.on('send-chat-message', (text) => {
-    const roomId = socket.data.roomId;
-    if (!roomId || !rooms[roomId]) return;
-    const room = rooms[roomId];
-    const user = room && room.users[socket.id];
-    if (!user || !room) return;
-
-    if (room.gameStatus !== 'waiting' && user.seat !== null) return;
-    if (room.gameStatus === 'day_voting' || room.gameStatus === 'night') return;
-
-    const message = String(text || '').trim();
-    if (!message) return;
-    io.to(roomId).emit('chat-message', {
-      username: socket.data.username,
-      text: message,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    on('create-room', (p = {}) => {
+      if (s.roomId) throw new GameError('Сначала выйдите из текущей комнаты');
+      join(engine.create(p), p);
+    });
+    on('join-room', (p = {}) => {
+      if (typeof p.roomId !== 'string' || !/^[1-9]\d{3}$/.test(p.roomId))
+        throw new GameError('Комната не найдена');
+      const room = engine.room(p.roomId);
+      if (s.roomId && s.roomId !== room.id)
+        throw new GameError('Сначала выйдите из текущей комнаты');
+      if (room.users[id]) return sync(socket, room, true);
+      join(room, p);
+    });
+    on('leave-room', async () => {
+      await leave(socket);
+      socket.emit('room-left');
+    });
+    on('take-seat', (seat) => engine.takeSeat(current(socket), id, seat));
+    on('leave-seat', () => engine.leaveSeat(current(socket), id));
+    on('set-ready', () => engine.ready(current(socket), id));
+    on('toggle-media', ({ mic } = {}) => {
+      const room = current(socket),
+        u = room.users[id];
+      if (typeof mic !== 'boolean') throw new GameError('Некорректное состояние микрофона');
+      if (mic && !engine.canSpeak(room, u)) throw new GameError('Сейчас говорить нельзя');
+      u.mic = mic;
+      engine.update(room);
+    });
+    on('get-livekit-token', async () => {
+      const room = current(socket),
+        data = await media.token(room, room.users[id]);
+      if (s.roomId === room.id) socket.emit('livekit-token', { ...data, roomId: room.id });
+    });
+    on('media-ready', async () => {
+      const room = current(socket),
+        u = room.users[id];
+      u.mediaConnected = true;
+      u.mediaPermission = null;
+      await media.sync(room);
+      if (s.roomId === room.id) engine.update(room);
+    });
+    on(
+      'night-action',
+      ({ targetId, actionType, revision, targetIds } = {}) =>
+        engine.act(current(socket), id, targetId, actionType, revision, targetIds),
+      'night-action-ack'
+    );
+    on(
+      'day-vote',
+      ({ targetId, revision } = {}) => engine.vote(current(socket), id, targetId, revision),
+      'day-vote-ack'
+    );
+    on('send-chat-message', (text) => {
+      const room = current(socket),
+        u = room.users[id];
+      if (!engine.canChat(room, u)) throw new GameError('Чат сейчас недоступен');
+      if (typeof text !== 'string' || !text.trim() || text.length > 150)
+        throw new GameError('Сообщение должно содержать от 1 до 150 символов');
+      io.to(room.id).emit('chat-message', {
+        username: u.username,
+        text: text.trim(),
+        time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+      });
+    });
+    socket.on('disconnect', () => {
+      if (closing) return;
+      if (clients.get(id) !== socket) return;
+      clients.delete(id);
+      const room = engine.rooms.get(s.roomId),
+        u = room?.users[id];
+      if (!u) return;
+      Object.assign(u, {
+        connected: false,
+        mic: false,
+        isReady: false,
+        disconnectDeadline: Date.now() + settings.RECONNECT_GRACE_MS,
+      });
+      engine.update(room);
+      u.disconnectTimer = setTimeout(() => {
+        if (!u.connected && engine.rooms.get(room.id) === room) {
+          engine.remove(room, id);
+          media.remove(room, id);
+          if (s.roomId === room.id) s.roomId = null;
+        }
+      }, settings.RECONNECT_GRACE_MS);
     });
   });
-
-  socket.on('disconnect', () => {
-    const roomId = socket.data.roomId;
-    if (roomId && rooms[roomId]) {
-      const room = rooms[roomId];
-      for (let i = 0; i < room.maxSeats; i++) if (room.seats[i] === socket.id) room.seats[i] = null;
-      delete room.users[socket.id];
-
-      if (Object.keys(room.users).length === 0) {
-        clearInterval(room.timer);
-        delete rooms[roomId];
-      } else {
-        emitRoomUpdate(roomId);
-      }
-    }
-  });
-});
-
-function emitRoomUpdate(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  let currentSpeakerId = null;
-  if (room.gameStatus === 'day_speeches' && room.turnOrder && room.turnOrder[room.currentTurnIndex]) {
-    currentSpeakerId = room.turnOrder[room.currentTurnIndex].id;
-  }
-  // sanitize users to avoid leaking private role information
-  const publicUsers = {};
-  Object.entries(room.users).forEach(([sid, u]) => {
-    publicUsers[sid] = {
-      id: u.id,
-      username: u.username,
-      photoUrl: u.photoUrl,
-      seat: u.seat,
-      mic: u.mic,
-      isReady: u.isReady,
-      isAlive: !!u.isAlive
-    };
-  });
-
-  io.to(roomId).emit('update-room', {
-    roomName: room.name,
-    maxSeats: room.maxSeats,
-    hasChat: room.hasChat,
-    enabledRoles: room.enabledRoles,
-    users: publicUsers,
-    seats: room.seats,
-    gameStatus: room.gameStatus,
-    lastWordPlayerId: room.lastWordPlayerId,
-    doctorSelfHealUsedLastNight: room.doctorSelfHealUsedLastNight,
-    votes: room.votes || {},
-    currentSpeakerId: currentSpeakerId
-  });
+  const cleanup = setInterval(() => {
+    for (const [token, s] of sessions)
+      if (!s.roomId && !clients.has(s.id) && Date.now() - s.lastSeen > 86400000)
+        sessions.delete(token);
+  }, 60000);
+  cleanup.unref();
+  return {
+    app,
+    server,
+    io,
+    engine,
+    close: async () => {
+      closing = true;
+      clearInterval(cleanup);
+      for (const room of engine.rooms.values())
+        for (const u of Object.values(room.users)) clearTimeout(u.disconnectTimer);
+      engine.close();
+      await new Promise((resolve) => io.close(resolve));
+    },
+  };
 }
-
-function startPlayingPhase(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  // Use mafia-style game start: assign roles and begin the night phase
-  startGame(roomId);
-}
-
-function startTurn(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  if (room.currentTurnIndex >= room.turnOrder.length) { startDiscussionPhase(roomId); return; }
-  const activePlayer = room.turnOrder[room.currentTurnIndex];
-  let timeLeft = 15;
-  io.to(roomId).emit('turn-changed', { activePlayerId: activePlayer.id, timeLeft });
-  clearInterval(room.timer);
-  room.timer = setInterval(() => {
-    timeLeft--;
-    if (timeLeft > 0) io.to(roomId).emit('timer-tick', { timeLeft });
-    else { clearInterval(room.timer); room.currentTurnIndex++; startTurn(roomId); }
-  }, 1000);
-}
-
-// --- Mafia game helper functions ---
-function assignRoles(players) {
-  // players: array of user objects (sitting players)
-  const shuffled = [...players].sort(() => 0.5 - Math.random());
-  const n = shuffled.length;
-  if (n === 0) return;
-
-  // Basic distribution used here (can be improved later):
-  // If at least 3 players: 1 mafia, 1 cop, 1 doctor, rest civilians
-  // If 2 players: 1 mafia, 1 civilian
-  // If 1 player: civilian
-  shuffled.forEach((player, idx) => {
-    if (n >= 3) {
-      if (idx === 0) player.role = 'mafia';
-      else if (idx === 1) player.role = 'cop';
-      else if (idx === 2) player.role = 'doctor';
-      else player.role = 'civilian';
-    } else if (n === 2) {
-      if (idx === 0) player.role = 'mafia';
-      else player.role = 'civilian';
-    } else {
-      player.role = 'civilian';
-    }
-    player.isAlive = true;
-  });
-}
-
-function startGame(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-
-  // collect seated players
-  const seated = Object.values(room.users).filter(u => u.seat !== null);
-  if (seated.length === 0) return;
-
-  // reset night actions
-  room.nightActions = { mafiaTarget: null, doctorTarget: null, copTarget: null };
-  room.votes = {};
-
-  // assign roles
-  assignRoles(seated);
-
-  // notify each player privately about their role
-  seated.forEach(player => {
-    io.to(player.id).emit('game-started', { role: player.role, status: 'night' });
-  });
-
-  // update room status and clients
-  room.gameStatus = 'night';
-  room.nightActionActors = {};
-  // broadcast to room that the game started (clients may also receive personal role via private event)
-  io.to(roomId).emit('game-started', { roomStatus: room.gameStatus });
-  emitRoomUpdate(roomId);
-
-  // start night phase timer
-  startNightPhase(roomId);
-}
-
-function startNightPhase(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  room.gameStatus = 'night';
-  room.nightActionActors = {};
-  let timeLeft = 30;
-
-  console.log(`startNightPhase ${roomId}: starting night for ${Object.keys(room.users).length} users`);
-  io.to(roomId).emit('night-started', { timeLeft });
-
-  clearInterval(room.timer);
-  room.timer = setInterval(() => {
-    timeLeft--;
-    if (timeLeft > 0) {
-      io.to(roomId).emit('timer-tick', { timeLeft });
-    } else {
-      // emit final tick 0 so clients can update UI consistently
-      io.to(roomId).emit('timer-tick', { timeLeft: 0 });
-      clearInterval(room.timer);
-      room.timer = null;
-      resolveNight(roomId);
-    }
-  }, 1000);
-}
-
-function resolveNight(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  const { mafiaTarget, doctorTarget } = room.nightActions || {};
-  let killedPlayerName = null;
-
-  const doctor = Object.values(room.users).find(u => u.role === 'doctor');
-  room.doctorSelfHealUsedLastNight = !!doctor && doctorTarget === doctor.id;
-
-  console.log(`resolveNight ${roomId}: mafia -> ${mafiaTarget}, doctor -> ${doctorTarget}, cop -> ${room.nightActions && room.nightActions.copTarget}`);
-
-  if (mafiaTarget && mafiaTarget !== doctorTarget) {
-    const victim = room.users[mafiaTarget];
-    if (victim) {
-      victim.isAlive = false;
-      killedPlayerName = victim.username;
-    }
-  }
-
-  const winner = checkVictory(room);
-  io.to(roomId).emit('night-result', { killedPlayerName, winner });
-
-  // Show the death, then give the eliminated player a last word.
-  setTimeout(() => {
-    if (winner) endGame(roomId, winner);
-    else if (killedPlayerName && mafiaTarget) startLastWordPhase(roomId, mafiaTarget, 'speeches');
-    else startDaySpeechesPhase(roomId);
-  }, 5000);
-}
-
-function startDaySpeechesPhase(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  room.gameStatus = 'day_speeches';
-  // turn order = alive seated players
-  room.turnOrder = Object.values(room.users).filter(u => u.seat !== null && u.isAlive);
-  room.currentTurnIndex = 0;
-  emitRoomUpdate(roomId);
-  startNextTurn(roomId);
-}
-
-function startNextTurn(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  if (!room.turnOrder || room.currentTurnIndex >= room.turnOrder.length) {
-    startGeneralDiscussion(roomId);
-    return;
-  }
-
-  const activePlayer = room.turnOrder[room.currentTurnIndex];
-  let timeLeft = 15;
-  console.log(`startNextTurn ${roomId}: active ${activePlayer && activePlayer.id}`);
-  io.to(roomId).emit('turn-changed', { activePlayerId: activePlayer.id, timeLeft });
-
-  clearInterval(room.timer);
-  room.timer = setInterval(() => {
-    timeLeft--;
-    if (timeLeft > 0) {
-      io.to(roomId).emit('timer-tick', { timeLeft });
-    } else {
-      io.to(roomId).emit('timer-tick', { timeLeft: 0 });
-      clearInterval(room.timer);
-      room.timer = null;
-      room.currentTurnIndex++;
-      startNextTurn(roomId);
-    }
-  }, 1000);
-}
-
-function startGeneralDiscussion(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  room.gameStatus = 'day_discussion';
-  let timeLeft = 30;
-  console.log(`startGeneralDiscussion ${roomId}: starting discussion`);
-  io.to(roomId).emit('discussion-started', { timeLeft });
-  emitRoomUpdate(roomId);
-
-  clearInterval(room.timer);
-  room.timer = setInterval(() => {
-    timeLeft--;
-    if (timeLeft > 0) {
-      io.to(roomId).emit('timer-tick', { timeLeft });
-    } else {
-      io.to(roomId).emit('timer-tick', { timeLeft: 0 });
-      clearInterval(room.timer);
-      room.timer = null;
-      startDayVoting(roomId);
-    }
-  }, 1000);
-}
-
-function startDayVoting(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  room.gameStatus = 'day_voting';
-  room.votes = {};
-  room.nightActionActors = {};
-  room.lastWordPlayerId = null;
-  let timeLeft = 30;
-  io.to(roomId).emit('voting-started', { timeLeft });
-  emitRoomUpdate(roomId);
-  clearInterval(room.timer);
-  room.timer = setInterval(() => {
-    timeLeft--;
-    io.to(roomId).emit('timer-tick', { timeLeft: Math.max(timeLeft, 0) });
-    if (timeLeft <= 0) {
-      clearInterval(room.timer);
-      room.timer = null;
-      resolveDayVote(roomId);
-    }
-  }, 1000);
-}
-
-function checkVictory(room) {
-  const alive = Object.values(room.users).filter(u => u.seat !== null && u.isAlive);
-  const mafiaPower = alive
-    .filter(u => getClan(u.role) === 'mafia')
-    .reduce((sum, u) => sum + getVotePower(u.role), 0);
-  const peacefulPower = alive
-    .filter(u => getClan(u.role) !== 'mafia')
-    .reduce((sum, u) => sum + getVotePower(u.role), 0);
-  if (mafiaPower === 0) return 'peaceful';
-  if (alive.filter(u => getClan(u.role) === 'mafia').length === 1 &&
-      alive.filter(u => getClan(u.role) !== 'mafia').length === 1) return 'mafia';
-  if (mafiaPower >= peacefulPower) return 'mafia';
-  return null;
-}
-
-function resolveDayVote(roomId) {
-  const room = rooms[roomId];
-  if (!room || room.gameStatus !== 'day_voting') return;
-  clearInterval(room.timer);
-  room.timer = null;
-  const counts = {};
-  Object.entries(room.votes).forEach(([voterId, targetId]) => {
-    const voter = room.users[voterId];
-    const target = room.users[targetId];
-    if (voter && voter.isAlive && target && target.isAlive) counts[targetId] = (counts[targetId] || 0) + 1;
-  });
-  const maxVotes = Math.max(0, ...Object.values(counts));
-  const leaders = Object.keys(counts).filter(id => counts[id] === maxVotes);
-  const eliminated = leaders.length === 1 ? room.users[leaders[0]] : null;
-  if (eliminated) eliminated.isAlive = false;
-  const winner = checkVictory(room);
-  io.to(roomId).emit('day-vote-result', {
-    eliminatedPlayerName: eliminated ? eliminated.username : null,
-    tie: leaders.length > 1,
-    winner
-  });
-  if (winner) setTimeout(() => endGame(roomId, winner), 3000);
-  else if (eliminated) setTimeout(() => startLastWordPhase(roomId, eliminated.id, 'night'), 3000);
-  else setTimeout(() => startNightPhase(roomId), 3000);
-}
-
-function startLastWordPhase(roomId, playerId, nextPhase) {
-  const room = rooms[roomId];
-  const player = room && room.users[playerId];
-  if (!room || !player) {
-    if (nextPhase === 'night') startNightPhase(roomId);
-    else startDaySpeechesPhase(roomId);
-    return;
-  }
-
-  room.gameStatus = 'last_words';
-  room.lastWordPlayerId = playerId;
-  Object.values(room.users).forEach(u => { u.mic = u.id === playerId; });
-  const timeLeft = 15;
-  io.to(roomId).emit('last-word-started', {
-    playerId,
-    playerName: player.username,
-    timeLeft,
-    nextPhase
-  });
-  emitRoomUpdate(roomId);
-  clearInterval(room.timer);
-  room.timer = setInterval(() => {
-    const remaining = timeLeft - Math.floor((Date.now() - room.lastWordStartedAt) / 1000);
-    io.to(roomId).emit('timer-tick', { timeLeft: Math.max(remaining, 0) });
-    if (remaining <= 0) {
-      clearInterval(room.timer);
-      room.timer = null;
-      player.mic = false;
-      room.lastWordPlayerId = null;
-      emitRoomUpdate(roomId);
-      if (nextPhase === 'night') startNightPhase(roomId);
-      else startDaySpeechesPhase(roomId);
-    }
-  }, 1000);
-  room.lastWordStartedAt = Date.now();
-}
-
-// keep startDiscussionPhase as a compatibility wrapper
-function startDiscussionPhase(roomId) { startGeneralDiscussion(roomId); }
-
-function endGame(roomId, winner = null) {
-  const room = rooms[roomId];
-  if (!room) return;
-  console.log(`endGame ${roomId}: resetting game state`);
-  room.gameStatus = 'waiting';
-  // reset readiness and role/alive state
-  Object.values(room.users).forEach(u => {
-    u.isReady = false;
-    u.role = null;
-    u.isAlive = false;
-  });
-  // clear game internals
-  room.nightActions = { mafiaTarget: null, doctorTarget: null, copTarget: null };
-  room.votes = {};
-  room.nightActionActors = {};
-  room.turnOrder = [];
-  room.currentTurnIndex = 0;
-  room.lastWordPlayerId = null;
-
-  io.to(roomId).emit('game-ended', { winner });
-  emitRoomUpdate(roomId);
-}
-
-const PORT = config.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+module.exports = { createApplication };

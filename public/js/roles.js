@@ -7,6 +7,6 @@
     { id: 'doctor', name: 'Врач', clan: 'peaceful', enabledByDefault: true },
     { id: 'sergeant', name: 'Сержант', clan: 'peaceful', enabledByDefault: false },
     { id: 'journalist', name: 'Журналист', clan: 'peaceful', enabledByDefault: false },
-    { id: 'mistress', name: 'Любовница', clan: 'peaceful', enabledByDefault: false }
+    { id: 'mistress', name: 'Любовница', clan: 'peaceful', enabledByDefault: false },
   ];
 })();

@@ -6,22 +6,33 @@ const ROLE_DEFINITIONS = [
   { id: 'doctor', name: 'Врач', clan: 'peaceful', enabledByDefault: true },
   { id: 'sergeant', name: 'Сержант', clan: 'peaceful', enabledByDefault: false },
   { id: 'journalist', name: 'Журналист', clan: 'peaceful', enabledByDefault: false },
-  { id: 'mistress', name: 'Любовница', clan: 'peaceful', enabledByDefault: false }
+  { id: 'mistress', name: 'Любовница', clan: 'peaceful', enabledByDefault: false },
 ];
 
 const ROLE_IDS = new Set(ROLE_DEFINITIONS.map((role) => role.id));
-const DEFAULT_ENABLED_ROLE_IDS = ROLE_DEFINITIONS
-  .filter((role) => role.enabledByDefault)
-  .map((role) => role.id);
+const DEFAULT_ENABLED_ROLE_IDS = ROLE_DEFINITIONS.filter((role) => role.enabledByDefault).map(
+  (role) => role.id
+);
 
-const VOTE_POWER = {
+const PLAYER_WEIGHT = {
   cop: 2,
   doctor: 2,
-  mistress: 2
+  mistress: 2,
 };
 
-function getVotePower(role) {
-  return VOTE_POWER[role] || 1;
+function getPlayerWeight(role) {
+  return PLAYER_WEIGHT[role] || 1;
+}
+
+function evaluateVictory(room) {
+  let mafia = 0,
+    peaceful = 0;
+  for (const u of Object.values(room.users).filter((u) => u.seat !== null && u.isAlive)) {
+    if (getClan(u.role) === 'mafia') mafia += getPlayerWeight(u.role);
+    else peaceful += getPlayerWeight(u.role);
+  }
+  if (mafia === 0) return 'peaceful';
+  return mafia >= peaceful ? 'mafia' : null;
 }
 
 function getClan(role) {
@@ -37,6 +48,7 @@ module.exports = {
   ROLE_DEFINITIONS,
   DEFAULT_ENABLED_ROLE_IDS,
   normalizeEnabledRoles,
-  getVotePower,
-  getClan
+  getPlayerWeight,
+  evaluateVictory,
+  getClan,
 };

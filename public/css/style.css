@@ -689,3 +689,37 @@ input[type="text"] {
   color: var(--luxury-text);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), inset 0 0 12px rgba(0, 0, 0, 0.65);
 }
+
+/* Keep the existing artwork and palette; make controls fit the available viewport. */
+#modal-overlay { padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); }
+.modal { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+.modal > * { flex-shrink: 0; }
+#room { padding-top: calc(var(--tg-safe-top, 0px) + 16px); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.room-main-area { min-height: 0; }
+.table-container { height: auto; min-height: 100px; max-height: none; flex: 1 1 0; }
+.controls, #night-actions { flex-shrink: 0; }
+.seat-wrap .seat { position: relative; padding: 0; }
+.seat.occupied > .seat-vote-check, .seat.occupied > .seat-target-check, .seat.occupied > .seat-dead-cross { display: flex; }
+.disconnected-seat { opacity: .45; }
+#night-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-width: 100%; }
+#night-actions[hidden], [hidden] { display: none !important; }
+#night-actions .menu-action { padding: 5px 8px; font-size: 11px; }
+#night-actions small { width: 100%; text-align: center; font-size: 10px; }
+.selected-action { outline: 1px solid var(--luxury-gold-light); }
+#app-notice { position: fixed; left: 50%; transform: translateX(-50%); top: max(10px, env(safe-area-inset-top)); z-index: 2000; width: min(92vw, 480px); padding: 12px; border: 1px solid #b95d50; border-radius: 8px; background: #301a16; color: #ffe6cd; font-size: 14px; }
+#connection-status:not(:empty) { position: fixed; bottom: 0; left: 0; right: 0; z-index: 2000; padding: 8px; background: #301a16; text-align: center; font-size: 12px; }
+.role-card-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.8); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; padding: 20px; }
+.role-card-overlay img { max-width: 85%; max-height: 75%; border-radius: 12px; box-shadow: 0 12px 30px #000; }
+.event-feed { width: min(48vw, 220px); pointer-events: none; }
+.event-feed-list { pointer-events: auto; }
+.voting-paper { width: min(48vw, 210px); max-height: 60%; overflow-y: auto; }
+.event-feed:has(+ .voting-paper:not(.hidden)) { display: none; }
+.audio-retry { padding: 4px 8px; font-size: 11px; }
+.role-check-history { width: min(90vw, 400px); max-height: 20vh; overflow-y: auto; color: var(--luxury-gold-light); font-size: 13px; }
+.role-card-overlay:has(.role-check-history) img { max-height: 55%; }
+@media (max-height: 500px) {
+  .room-header { min-height: 32px; }
+  .game-status-panel { padding: 4px; margin: 0; }
+  .controls .ctrl-btn, .controls .role-card { height: 40px; }
+  #room { gap: 4px; }
+}
