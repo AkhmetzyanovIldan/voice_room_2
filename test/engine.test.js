@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { GameEngine } = require('../server/engine');
-const { evaluateVictory, getPlayerWeight } = require('../server/roles');
+const { evaluateVictory } = require('../server/roles');
 
 function fixture(t, roles = ['mafia', 'doctor', 'cop', 'civilian', 'civilian', 'civilian']) {
   const events = [];
@@ -23,15 +23,14 @@ function fixture(t, roles = ['mafia', 'doctor', 'cop', 'civilian', 'civilian', '
     engine.act(room, id, target, type, room.revision, targets);
   return { engine, room, events, act };
 }
-test('weights determine victory; one mafia does not beat one doctor/cop/mistress', () => {
+test('a passive extra weight no longer prevents mafia victory at parity', () => {
   for (const role of ['doctor', 'cop', 'mistress']) {
     const room = {
       users: { a: { seat: 0, isAlive: true, role: 'mafia' }, b: { seat: 1, isAlive: true, role } },
     };
-    assert.equal(evaluateVictory(room), null);
-    assert.equal(getPlayerWeight(role), 2);
+    assert.equal(evaluateVictory(room), 'mafia');
     room.users.b.voteBlockedRound = 1;
-    assert.equal(evaluateVictory(room), null);
+    assert.equal(evaluateVictory(room), 'mafia');
     room.users.b.role = 'civilian';
     assert.equal(evaluateVictory(room), 'mafia');
     room.users.a.isAlive = false;
@@ -178,7 +177,7 @@ test('journalist publishes camp comparison only when surviving the night', (t) =
   engine.resolveNight(room);
   assert.deepEqual(events.filter((e) => e.event === 'night-result').at(-1).data.headlines, []);
 });
-test('charm blocks upcoming vote and next night, not current night or weight', (t) => {
+test('charm blocks upcoming vote and next night, not current night', (t) => {
   const { engine, room, act } = fixture(t, ['mafia', 'mistress', 'doctor', 'cop', 'civilian']);
   act('p1', 'p3', 'mistress_charm');
   act('p3', 'p0', 'cop_check');
@@ -214,7 +213,7 @@ test('skip counts as submitted and unanimous skips eliminate nobody', (t) => {
 test('microphone permission follows phase, life, connection and speaker', (t) => {
   const { engine, room } = fixture(t);
   const u = room.users.p0;
-  assert.equal(engine.canSpeak(room, u), false);
+  assert.equal(engine.canSpeak(room, u), true);
   engine.speeches(room);
   assert.equal(engine.canSpeak(room, u), true);
   assert.equal(engine.canSpeak(room, room.users.p1), false);
@@ -256,4 +255,33 @@ test('invalid room configuration and seat input are rejected', (t) => {
   room.gameStatus = 'waiting';
   assert.throws(() => engine.takeSeat(room, 'p0', 100));
   assert.throws(() => engine.takeSeat(room, 'p0', '1'));
+});
+
+test('healing and charm notify only their target; night speaking does not reveal the clan', (t) => {
+  const { engine, room, events, act } = fixture(t, [
+    'mafia',
+    'doctor',
+    'mistress',
+    'civilian',
+    'civilian',
+  ]);
+  assert.equal(engine.durations.night, 20);
+  room.users.p0.mic = true;
+  const publicUser = engine.snapshot(room).users.p0;
+  assert.equal(publicUser.mic, false);
+  assert.equal(publicUser.canSpeak, false);
+  assert.equal(engine.privateState(room, 'p0').canSpeak, true);
+  assert.equal(engine.privateState(room, 'p3').canSpeak, false);
+  act('p0', 'p3', 'mafia_kill');
+  act('p1', 'p3', 'doctor_heal');
+  act('p2', 'p0', 'mistress_charm');
+  engine.resolveNight(room);
+  assert.deepEqual(
+    events.filter((e) => e.event === 'healed').map((e) => [e.id, e.data.saved]),
+    [['p3', true]]
+  );
+  assert.deepEqual(
+    events.filter((e) => e.event === 'charmed').map((e) => e.id),
+    ['p0']
+  );
 });

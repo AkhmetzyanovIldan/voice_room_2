@@ -174,9 +174,12 @@ function createApplication(options = {}) {
         data = await media.token(room, room.users[id]);
       if (s.roomId === room.id) socket.emit('livekit-token', { ...data, roomId: room.id });
     });
-    on('media-ready', async () => {
+    on('media-ready', async ({ channel } = {}) => {
       const room = current(socket),
         u = room.users[id];
+      if (!channel || channel !== engine.mediaChannel(room, u))
+        throw new GameError('Голосовой канал уже изменился');
+      u.mediaChannel = channel;
       u.mediaConnected = true;
       u.mediaPermission = null;
       await media.sync(room);
@@ -199,11 +202,16 @@ function createApplication(options = {}) {
       if (!engine.canChat(room, u)) throw new GameError('Чат сейчас недоступен');
       if (typeof text !== 'string' || !text.trim() || text.length > 150)
         throw new GameError('Сообщение должно содержать от 1 до 150 символов');
-      io.to(room.id).emit('chat-message', {
+      const message = {
+        channel: room.gameStatus === 'night' ? 'mafia' : 'room',
         username: u.username,
         text: text.trim(),
         time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-      });
+      };
+      if (message.channel === 'mafia') {
+        for (const receiver of Object.values(room.users))
+          if (engine.canChat(room, receiver)) personal(receiver.id, 'chat-message', message);
+      } else io.to(room.id).emit('chat-message', message);
     });
     socket.on('disconnect', () => {
       if (closing) return;

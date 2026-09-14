@@ -14,25 +14,27 @@ const DEFAULT_ENABLED_ROLE_IDS = ROLE_DEFINITIONS.filter((role) => role.enabledB
   (role) => role.id
 );
 
-const PLAYER_WEIGHT = {
-  cop: 2,
-  doctor: 2,
-  mistress: 2,
-};
-
-function getPlayerWeight(role) {
-  return PLAYER_WEIGHT[role] || 1;
-}
-
-function evaluateVictory(room) {
-  let mafia = 0,
-    peaceful = 0;
-  for (const u of Object.values(room.users).filter((u) => u.seat !== null && u.isAlive)) {
-    if (getClan(u.role) === 'mafia') mafia += getPlayerWeight(u.role);
-    else peaceful += getPlayerWeight(u.role);
+function evaluateVictory(room, phase) {
+  const living = Object.values(room.users).filter((u) => u.seat !== null && u.isAlive);
+  if (!living.some((u) => u.role === 'mafia' || u.role === 'don')) return 'peaceful';
+  const mafia = living.filter((u) => getClan(u.role) === 'mafia').length;
+  const peaceful = living.length - mafia;
+  if (!peaceful) return 'mafia';
+  if (peaceful > mafia) return null;
+  // During a submitted night, wait for its real outcome rather than replacing
+  // irrevocable choices with hypothetical ones.
+  if (!phase && room.gameStatus === 'night' && Object.keys(room.nightActionActors || {}).length)
+    return null;
+  if (!phase) {
+    phase =
+      room.victoryPhase ||
+      (['day_speeches', 'day_discussion', 'day_voting', 'night_result'].includes(room.gameStatus)
+        ? 'day'
+        : 'night');
+    if (phase === 'night' && ['vote_result', 'last_words'].includes(room.gameStatus))
+      room = { ...room, round: room.round + 1 };
   }
-  if (mafia === 0) return 'peaceful';
-  return mafia >= peaceful ? 'mafia' : null;
+  return require('./endgame').civilianCanWin(room, phase) === false ? 'mafia' : null;
 }
 
 function getClan(role) {
@@ -48,7 +50,6 @@ module.exports = {
   ROLE_DEFINITIONS,
   DEFAULT_ENABLED_ROLE_IDS,
   normalizeEnabledRoles,
-  getPlayerWeight,
   evaluateVictory,
   getClan,
 };

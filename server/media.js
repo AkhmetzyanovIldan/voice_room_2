@@ -9,10 +9,14 @@ function createMedia(config, engine, onFailure, sdk = { AccessToken, RoomService
       )
     : null;
   const queues = new Map();
+  const roomName = (room, channel) =>
+    channel === 'mafia' ? `${room.mediaRoom}-clan` : room.mediaRoom;
   return {
     enabled,
     async token(room, user) {
-      if (!enabled) return { token: null, url: null };
+      await this.sync(room);
+      const channel = engine.mediaChannel(room, user);
+      if (!enabled || !channel) return { token: null, url: null, channel, enabled };
       const at = new sdk.AccessToken(config.LK_API_KEY, config.LK_API_SECRET, {
         identity: user.id,
         name: user.username,
@@ -20,13 +24,13 @@ function createMedia(config, engine, onFailure, sdk = { AccessToken, RoomService
       });
       at.addGrant({
         roomJoin: true,
-        room: room.mediaRoom,
+        room: roomName(room, channel),
         canPublish: false,
         canSubscribe: false,
         canPublishData: false,
         canPublishSources: [2],
       });
-      return { token: await at.toJwt(), url: config.LIVEKIT_URL };
+      return { token: await at.toJwt(), url: config.LIVEKIT_URL, channel, enabled };
     },
     sync(room) {
       if (!service) return Promise.resolve();
@@ -38,10 +42,23 @@ function createMedia(config, engine, onFailure, sdk = { AccessToken, RoomService
             Object.values(room.users)
               .filter((u) => u.mediaConnected)
               .map(async (u) => {
+                const channel = engine.mediaChannel(room, u);
+                if (u.mediaChannel !== channel) {
+                  try {
+                    await service.removeParticipant(roomName(room, u.mediaChannel), u.id);
+                  } catch (e) {
+                    if (e.code !== 'not_found') {
+                      onFailure(u.id);
+                      return;
+                    }
+                  }
+                  u.mediaConnected = false;
+                  u.mediaPermission = null;
+                  return;
+                }
                 const permission = {
                   canPublish: engine.canSpeak(room, u),
-                  canSubscribe:
-                    !!u.connected && !['night', 'night_result'].includes(room.gameStatus),
+                  canSubscribe: !!channel,
                   canPublishData: false,
                   canPublishSources: [2],
                   canUpdateMetadata: false,
@@ -49,13 +66,14 @@ function createMedia(config, engine, onFailure, sdk = { AccessToken, RoomService
                 const signature = JSON.stringify(permission);
                 if (u.mediaPermission === signature) return;
                 try {
-                  await service.updateParticipant(room.mediaRoom, u.id, { permission });
+                  await service.updateParticipant(roomName(room, channel), u.id, { permission });
                   u.mediaPermission = signature;
-                } catch {
+                } catch (e) {
                   u.mediaPermission = null;
                   u.mediaConnected = false;
+                  if (e.code === 'not_found') return;
                   try {
-                    await service.removeParticipant(room.mediaRoom, u.id);
+                    await service.removeParticipant(roomName(room, channel), u.id);
                   } catch {}
                   onFailure(u.id);
                 }
@@ -63,16 +81,18 @@ function createMedia(config, engine, onFailure, sdk = { AccessToken, RoomService
           );
         });
       queues.set(room.id, job);
-      job.finally(() => {
+      const cleanup = () => {
         if (queues.get(room.id) === job) queues.delete(room.id);
-      });
+      };
+      job.then(cleanup, cleanup);
       return job;
     },
     async remove(room, id) {
       if (service)
-        try {
-          await service.removeParticipant(room.mediaRoom, id);
-        } catch {}
+        for (const channel of ['room', 'mafia'])
+          try {
+            await service.removeParticipant(roomName(room, channel), id);
+          } catch {}
     },
   };
 }

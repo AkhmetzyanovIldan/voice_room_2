@@ -13,7 +13,7 @@ const ROLE_ACTIONS = {
 };
 
 const DURATIONS = {
-  night: 30,
+  night: 20,
   night_result: 5,
   day_speeches: 15,
   day_discussion: 30,
@@ -128,12 +128,27 @@ class GameEngine {
     if (room.gameStatus === 'last_words') return room.lastWordPlayerId === user.id;
     if (!user.isAlive) return false;
     return (
+      (room.gameStatus === 'night' && getClan(user.role) === 'mafia') ||
       room.gameStatus === 'day_discussion' ||
       (room.gameStatus === 'day_speeches' && this.speaker(room) === user.id)
     );
   }
   canChat(room, user) {
-    return room.hasChat && room.gameStatus === 'waiting' && !!user?.connected;
+    return (
+      !!user?.connected &&
+      (room.gameStatus === 'waiting'
+        ? room.hasChat
+        : room.gameStatus === 'night' &&
+          user.seat !== null &&
+          user.isAlive &&
+          getClan(user.role) === 'mafia')
+    );
+  }
+  mediaChannel(room, user) {
+    if (!user?.connected) return null;
+    if (room.gameStatus === 'night')
+      return user.seat !== null && getClan(user.role) === 'mafia' ? 'mafia' : null;
+    return room.gameStatus === 'night_result' ? null : 'room';
   }
 
   snapshot(room) {
@@ -145,11 +160,11 @@ class GameEngine {
         username,
         photoUrl,
         seat,
-        mic,
+        mic: room.gameStatus === 'night' ? false : mic,
         isReady,
         isAlive,
         connected,
-        canSpeak: this.canSpeak(room, u),
+        canSpeak: room.gameStatus === 'night' ? false : this.canSpeak(room, u),
         canVote: isAlive && seat !== null && u.voteBlockedRound !== room.round,
       };
     }
@@ -178,6 +193,8 @@ class GameEngine {
     for (const user of Object.values(room.users)) {
       if (!this.canSpeak(room, user)) user.mic = false;
     }
+    for (const u of Object.values(room.users))
+      this.personal(u.id, 'private-state', this.privateState(room, u.id));
     this.broadcast(room.id, 'update-room', this.snapshot(room));
     this.mediaChanged(room);
   }
@@ -191,6 +208,10 @@ class GameEngine {
           )
         : [];
     return {
+      canSpeak: this.canSpeak(room, u),
+      mic: !!u?.mic,
+      canChat: this.canChat(room, u),
+      mediaChannel: this.mediaChannel(room, u),
       role: u?.role || null,
       actions,
       submitted,
@@ -210,6 +231,9 @@ class GameEngine {
     clearTimeout(room.timer);
     room.revision++;
     room.gameStatus = phase;
+    if (phase === 'night' || phase === 'vote_result') room.victoryPhase = 'night';
+    else if (['night_result', 'day_speeches', 'day_discussion', 'day_voting'].includes(phase))
+      room.victoryPhase = 'day';
     room.lastWordPlayerId = phase === 'last_words' ? room.lastWordPlayerId : null;
     const seconds = this.durations[phase];
     room.deadline = next ? this.now() + seconds * 1000 : null;
@@ -264,6 +288,8 @@ class GameEngine {
     if (deck.length > players.length) throw new GameError('Ролей больше, чем игроков');
     while (deck.length < players.length) deck.push('civilian');
     const proposed = {
+      round: 1,
+      gameStatus: 'night',
       users: Object.fromEntries(deck.map((role, i) => [i, { role, isAlive: true, seat: i }])),
     };
     if (this.victory(proposed)) {
@@ -379,6 +405,8 @@ class GameEngine {
     const high = Math.max(0, ...Object.values(shots)),
       leaders = Object.keys(shots).filter((id) => shots[id] === high);
     if (leaders.length === 1) attacks.add(leaders[0]);
+    for (const id of heals)
+      this.personal(id, 'healed', { round: room.round, saved: attacks.has(id) });
     const killed = [...attacks]
       .filter((id) => !heals.has(id))
       .map((id) => room.users[id])
@@ -392,7 +420,7 @@ class GameEngine {
         names: j.targets.map((id) => room.users[id].username),
         sameClan: getClan(room.users[j.targets[0]].role) === getClan(room.users[j.targets[1]].role),
       }));
-    const winner = this.victory(room);
+    const winner = this.victory(room, 'day');
     const result = {
       killedPlayerName: killed.map((u) => u.username).join(', ') || null,
       killedPlayers: killed.map((u) => u.id),
@@ -488,7 +516,7 @@ class GameEngine {
     const leaders = Object.keys(counts).filter((id) => counts[id] === max);
     const eliminated = leaders.length === 1 ? room.users[leaders[0]] : null;
     if (eliminated) eliminated.isAlive = false;
-    const winner = this.victory(room);
+    const winner = this.victory({ ...room, round: room.round + 1 }, 'night');
     const result = {
       eliminatedPlayerName: eliminated?.username || null,
       tie: leaders.length > 1,

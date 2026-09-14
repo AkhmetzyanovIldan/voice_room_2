@@ -713,7 +713,6 @@ input[type="text"] {
 .event-feed { width: min(48vw, 220px); pointer-events: none; }
 .event-feed-list { pointer-events: auto; }
 .voting-paper { width: min(48vw, 210px); max-height: 60%; overflow-y: auto; }
-.event-feed:has(+ .voting-paper:not(.hidden)) { display: none; }
 .audio-retry { padding: 4px 8px; font-size: 11px; }
 .role-check-history { width: min(90vw, 400px); max-height: 20vh; overflow-y: auto; color: var(--luxury-gold-light); font-size: 13px; }
 .role-card-overlay:has(.role-check-history) img { max-height: 55%; }
@@ -723,3 +722,29 @@ input[type="text"] {
   .controls .ctrl-btn, .controls .role-card { height: 40px; }
   #room { gap: 4px; }
 }
+
+/* Chronological events occupy only the space between the player columns. */
+#lobby h1 { transform: translateY(18px); }
+.table-stage { position: relative; width: 100%; min-height: 100px; flex: 1 1 0; }
+.table-stage .table-container { height: 100%; min-height: 0; }
+.table-stage .event-feed {
+  inset: 0 88px; width: auto; max-height: none; transform: none;
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+  overflow-y: auto; overscroll-behavior: contain; pointer-events: auto;
+  scrollbar-width: thin; scrollbar-color: #756b5d transparent;
+}
+.event-feed-header { display: none; }
+.event-feed-list { max-height: none; overflow: visible; padding: 6px 0 12px; gap: 10px; }
+.event-feed-item { flex-shrink: 0; overflow-wrap: anywhere; padding: 9px 7px; }
+.event-feed-item.phase {
+  background: rgba(10,8,7,.55); border: 0; border-block: 1px solid rgba(212,175,55,.45);
+  border-radius: 0; text-align: center; font: bold 19px Georgia, serif; color: #e2c17c;
+  margin: 6px 0;
+}
+.event-feed .voting-paper {
+  position: static; width: 100%; transform: none; min-height: 0; max-height: none;
+  overflow: visible; padding: 10px 7px; margin-bottom: 10px;
+}
+.rules-card { max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; }
+.rules-card p { font-size: 13px; line-height: 1.5; }
+.rules-card h3 { font: bold 15px Georgia, serif; color: var(--luxury-gold-light); margin-top: 8px; }

@@ -26,6 +26,10 @@
     microphoneVersion = 0,
     replaced = false;
   let noticeTimer;
+  let mediaChannel,
+    mediaEnabled = true;
+  let shownFinal = '';
+  const shownPhases = new Set();
   const shownChecks = new Set();
   const notice = document.createElement('div');
   notice.id = 'app-notice';
@@ -43,13 +47,24 @@
   skip.textContent = 'Пропустить';
   skip.className = 'menu-action';
   $('voting-paper').append(skip);
+  const stage = document.createElement('div');
+  stage.className = 'table-stage';
+  $('table-container').before(stage);
+  stage.append($('table-container'), $('event-feed'));
+  $('event-feed').append($('voting-paper'));
   const retry = document.createElement('button');
   retry.textContent = 'Подключить звук';
   retry.className = 'audio-retry menu-action';
   retry.hidden = true;
   $('game-status-text').after(retry);
   const roleName = (id) => roles.get(id)?.name || id || '—';
-  const me = () => state?.users[mine];
+  const me = () =>
+    state?.users[mine] && {
+      ...state.users[mine],
+      ...(state.gameStatus === 'night'
+        ? { canSpeak: privateState.canSpeak, mic: privateState.mic }
+        : {}),
+    };
   const connected = () => api.socket.connected && !replaced;
   function error(message) {
     notice.textContent = message;
@@ -68,12 +83,21 @@
     return true;
   }
   function line(text, type = 'info') {
+    const feed = $('event-feed');
+    const follow = feed.scrollHeight - feed.clientHeight - feed.scrollTop < 45;
     const item = document.createElement('div');
     item.className = `event-feed-item ${type}`;
     item.textContent = text;
     $('event-feed-list').append(item);
-    while ($('event-feed-list').children.length > 12) $('event-feed-list').firstChild.remove();
+    while ($('event-feed-list').children.length > 200) $('event-feed-list').firstChild.remove();
     $('event-feed').classList.remove('hidden');
+    if (follow) feed.scrollTop = feed.scrollHeight;
+  }
+  function phaseLine(phase, round) {
+    const key = `${phase}:${round}`;
+    if (shownPhases.has(key)) return;
+    shownPhases.add(key);
+    line(`${phase === 'night' ? 'Ночь' : 'День'} ${round}`, 'phase');
   }
   function clearSelection() {
     action = null;
@@ -86,6 +110,9 @@
     roomId = null;
     privateState = {};
     shownChecks.clear();
+    shownPhases.clear();
+    shownFinal = '';
+    mediaChannel = undefined;
     clearSelection();
     $('event-feed-list').replaceChildren();
     $('chat-messages').replaceChildren();
@@ -172,7 +199,7 @@
   $('ready-btn-game').onclick = () => send('set-ready');
   window.toggleReady = () => send('set-ready');
   $('chat-toggle-btn').onclick = () => {
-    if (state?.hasChat) $('chat-container').classList.toggle('hidden');
+    if (privateState.canChat) $('chat-container').classList.toggle('hidden');
   };
   $('chat-close-btn').onclick = () => $('chat-container').classList.add('hidden');
   $('chat-send-btn').onclick = () => {
@@ -186,7 +213,7 @@
     if (e.key === 'Enter') window.confirmJoinRoom();
   };
   function requestAudio() {
-    if (!roomId || mediaPending) return;
+    if (!roomId || mediaPending || !mediaChannel || !mediaEnabled) return;
     mediaPending = true;
     retry.disabled = true;
     if (!send('get-livekit-token')) {
@@ -196,11 +223,12 @@
   }
   retry.onclick = requestAudio;
   $('audio-btn').onclick = async () => {
-    if (!window.gameAudio.connected()) return requestAudio();
     try {
-      sound = window.gameAudio.canPlay() ? !sound : true;
+      sound = window.gameAudio.connected() && !window.gameAudio.canPlay() ? true : !sound;
+      window.gameSounds?.mute(!sound);
       await window.gameAudio.mute(!sound);
       $('audio-btn').classList.toggle('active', sound);
+      if (sound && !window.gameAudio.connected()) requestAudio();
     } catch (e) {
       error(e.message);
     }
@@ -313,6 +341,7 @@
         const u = state.users[id];
         seat.classList.add('occupied');
         label.textContent = u?.username || '';
+        if (privateState.teammates?.includes(id) && id !== mine) label.textContent += ' · мафия';
         if (u?.photoUrl) {
           const img = document.createElement('img');
           img.src = u.photoUrl;
@@ -434,10 +463,10 @@
       microphoneVersion++;
       window.gameAudio.microphone(false).catch(() => {});
     }
-    $('chat-toggle-btn').disabled = !state.hasChat;
-    if (!state.hasChat) $('chat-container').classList.add('hidden');
-    $('chat-input').disabled = $('chat-send-btn').disabled =
-      !state.hasChat || !waiting || !connected();
+    $('chat-toggle-btn').disabled = !privateState.canChat;
+    if (!privateState.canChat) $('chat-container').classList.add('hidden');
+    $('chat-title').textContent = state.gameStatus === 'night' ? 'ЧАТ МАФИИ' : 'ЧАТ КОМНАТЫ';
+    $('chat-input').disabled = $('chat-send-btn').disabled = !privateState.canChat || !connected();
     const listeners = Object.values(state.users).filter((u) => u.seat === null);
     $('listeners-count-label').textContent = listeners.length;
     $('listeners-list-content').replaceChildren();
@@ -464,7 +493,7 @@
     if (state.result?.type === 'game')
       $('game-status-text').textContent =
         state.result.winner === 'mafia' ? 'МАФИЯ ПОБЕДИЛА' : 'МИРНЫЕ ПОБЕДИЛИ';
-    retry.hidden = window.gameAudio.connected() || mediaPending;
+    retry.hidden = !mediaEnabled || !mediaChannel || window.gameAudio.connected() || mediaPending;
     renderSeats();
     renderActions();
     renderVoting();
@@ -496,6 +525,8 @@
       cop: 'cop_cart.png',
       mistress: 'mistress_cart.png',
       civilian: 'civilian_cart.png',
+      journalist: 'jurnalist_cart.png',
+      sergeant: 'serjant_cart.png',
     };
     if (map[privateState.role]) {
       const img = document.createElement('img');
@@ -545,7 +576,9 @@
   }
   function gameResult(result) {
     if (!result?.players) return;
-    $('event-feed-list').replaceChildren();
+    const key = JSON.stringify([result.winner, result.players]);
+    if (shownFinal === key) return;
+    shownFinal = key;
     line(result.winner === 'mafia' ? 'Победила мафия' : 'Победили мирные');
     for (const p of result.players)
       line(`${p.seat + 1}. ${p.username} — ${roleName(p.role)}${p.isAlive ? '' : ' · выбыл'}`);
@@ -563,6 +596,8 @@
       ? 'Игра открыта в другой вкладке'
       : 'Соединение потеряно. Переподключение…';
     window.gameAudio.disconnect();
+    mediaPending = false;
+    mediaChannel = undefined;
     render();
   });
   events.on('connect_error', (e) => {
@@ -585,6 +620,12 @@
   });
   events.on('room-left', clearRoom);
   events.on('private-state', (d) => {
+    if (mediaChannel !== d.mediaChannel) {
+      mediaChannel = d.mediaChannel;
+      mediaPending = false;
+      window.gameAudio.disconnect();
+      requestAudio();
+    }
     privateState = d;
     pending = false;
     for (const result of d.checks || []) investigation(result);
@@ -595,18 +636,32 @@
     const old = state;
     if (!old || old.revision !== d.revision) {
       clearSelection();
-      if (d.gameStatus === 'night') {
+      if (old?.gameStatus === 'waiting' && d.gameStatus === 'night') {
+        shownPhases.clear();
+        shownFinal = '';
         $('event-feed-list').replaceChildren();
-        $('event-feed').classList.add('hidden');
       }
+      if (d.gameStatus === 'night') phaseLine('night', d.round);
+      else if (
+        ['night_result', 'day_speeches', 'day_discussion', 'day_voting'].includes(d.gameStatus)
+      )
+        phaseLine('day', d.round);
+      if (old?.gameStatus === 'night' || d.gameStatus === 'night')
+        $('chat-messages').replaceChildren();
     }
     state = d;
     timerOffset = d.deadline ? d.deadline - d.timeLeft * 1000 - Date.now() : 0;
-    if (old?.result?.type !== 'game' && d.result?.type === 'game') gameResult(d.result);
+    if (d.result?.type === 'game') gameResult(d.result);
     render();
   });
   events.on('livekit-token', async (d) => {
-    if (d.roomId !== roomId) return;
+    if (d.roomId !== roomId || d.channel !== mediaChannel) return;
+    mediaEnabled = d.enabled !== false;
+    if (!d.token) {
+      mediaPending = false;
+      render();
+      return;
+    }
     try {
       await window.gameAudio.connect(d);
     } catch (e) {
@@ -643,12 +698,15 @@
   });
   events.on('game-started', (d) => {
     shownChecks.clear();
+    shownPhases.clear();
+    $('chat-messages').replaceChildren();
     privateState = { role: d.role };
     $('event-feed-list').replaceChildren();
     showRole();
   });
   events.on('game-ended', (d) => {
     privateState = {};
+    $('chat-messages').replaceChildren();
     clearSelection();
     gameResult(d);
   });
@@ -666,11 +724,19 @@
   events.on('investigation-result', investigation);
   events.on('charmed', () =>
     line(
-      'Вы очарованы: ближайшее дневное голосование и способности следующей ночи недоступны.',
+      'К вам приходила любовница. Ближайшее дневное голосование и способности следующей ночи недоступны.',
       'alert'
     )
   );
+  events.on('healed', (d) =>
+    line(
+      d.saved ? 'Врач спас вас от выстрела этой ночью.' : 'Этой ночью врач вылечил вас.',
+      'success'
+    )
+  );
   events.on('night-result', (d) => {
+    phaseLine('day', d.round);
+    if (d.killedPlayers?.length) window.gameSounds?.shot();
     line(
       d.killedPlayerName ? `Погибли: ${d.killedPlayerName}` : 'Ночь прошла спокойно',
       d.killedPlayerName ? 'alert' : 'info'

@@ -46,6 +46,7 @@
     'day-vote-ack',
     'investigation-result',
     'charmed',
+    'healed',
     'livekit-token',
     'media-error',
     'chat-message',
